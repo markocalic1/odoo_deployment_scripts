@@ -94,6 +94,18 @@ if [ -z "$DOMAIN" ]; then
     exit 1
 fi
 
+read -p "Create DNS record in Cloudflare automatically? [Y/n]: " CF_AUTO
+CF_AUTO=${CF_AUTO:-Y}
+
+if [[ "$CF_AUTO" =~ ^[Yy]$ ]]; then
+    echo "Running Cloudflare DNS creation..."
+    bash cloudflare_dns.sh "$DOMAIN"
+    echo "✓ Cloudflare DNS step finished"
+else
+    echo "Skipping Cloudflare DNS creation."
+fi
+
+
 echo "---------------------------------------------------------"
 echo "Domain:        $DOMAIN"
 echo "Service name:  $SERVICE_NAME"
