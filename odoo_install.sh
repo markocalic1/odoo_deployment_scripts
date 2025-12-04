@@ -213,6 +213,36 @@ chown $OE_USER:$OE_USER /etc/$CONF_NAME
 chmod 640 /etc/$CONF_NAME
 
 
+# ---------------------------------------------------------
+# Log Rotation for Odoo
+# ---------------------------------------------------------
+
+echo "=== Setting up Odoo log rotation ==="
+
+ODOO_LOG_PATH=$(sed -n 's|^[[:space:]]*logfile[[:space:]]*=[[:space:]]*\(.*\)|\1|p' "/etc/$CONF_NAME" | head -n1)
+
+if [ -z "$ODOO_LOG_PATH" ]; then
+    echo "❌ Could not detect Odoo log file from config file!"
+else
+    LOGROTATE_FILE="/etc/logrotate.d/${SERVICE_NAME}"
+
+    cat <<EOF | sudo tee "$LOGROTATE_FILE" >/dev/null
+$ODOO_LOG_PATH {
+    daily
+    missingok
+    rotate 14
+    compress
+    delaycompress
+    notifempty
+    copytruncate
+}
+EOF
+
+    echo "✓ Odoo log rotation created at $LOGROTATE_FILE"
+    echo "✓ Rotating: $ODOO_LOG_PATH"
+fi
+
+
 # -------------------------------
 # Systemd service
 # -------------------------------
