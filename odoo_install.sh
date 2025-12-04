@@ -15,15 +15,32 @@ echo "============== ODOO UNIVERSAL INSTALLER =============="
 # Interactive settings
 # -------------------------------
 
-read -p "Odoo system user (example: odoo19, odoo20, odoo-dev): " OE_USER
-read -p "Install directory (example: /opt/odoo19): " OE_HOME
-read -p "Custom modules repo SSH URL: " REPO_URL
-read -p "Branch for your repo (main/staging/dev): " BRANCH
-read -p "PostgreSQL user (recommended: same as system user): " PG_USER
-read -p "Odoo version to install (e.g. 19.0, 20.0, master): " OE_VERSION
-read -p "Odoo config file name (example: odoo19.conf): " CONF_NAME
-read -p "Systemd service name (example: odoo19): " SERVICE_NAME
-read -p "Odoo port (default 8069): " OE_PORT
+read -p "Odoo system user [odoo]: " OE_USER
+OE_USER=${OE_USER:-odoo}
+
+read -p "Install directory [/opt/$OE_USER]: " OE_HOME
+OE_HOME=${OE_HOME:-/opt/$OE_USER}
+
+read -p "Custom modules repo SSH URL (leave empty to skip): " REPO_URL
+
+read -p "Branch [main]: " BRANCH
+BRANCH=${BRANCH:-main}
+
+read -p "PostgreSQL user [$OE_USER]: " PG_USER
+PG_USER=${PG_USER:-$OE_USER}
+
+read -p "Odoo version [19.0]: " OE_VERSION
+OE_VERSION=${OE_VERSION:-19.0}
+
+read -p "Config file name [$OE_USER.conf]: " CONF_NAME
+CONF_NAME=${CONF_NAME:-$OE_USER.conf}
+
+read -p "Systemd service name [$OE_USER]: " SERVICE_NAME
+SERVICE_NAME=${SERVICE_NAME:-$OE_USER}
+
+read -p "Port [8069]: " OE_PORT
+OE_PORT=${OE_PORT:-8069}
+
 OE_PORT=${OE_PORT:-8069}
 
 echo "---------------------------------------------------------"
@@ -76,9 +93,14 @@ chown -R $OE_USER:$OE_USER $OE_HOME
 # Clone your repo
 # -------------------------------
 
-echo "[4/8] Cloning custom modules..."
-sudo -u $OE_USER git clone -b $BRANCH $REPO_URL $OE_HOME/src
+echo "[4/8] Processing custom addons repository..."
 
+if [ -n "$REPO_URL" ]; then
+    echo "→ Cloning custom modules..."
+    sudo -u $OE_USER git clone -b $BRANCH $REPO_URL $OE_HOME/src
+else
+    echo "→ No repo provided, skipping custom modules."
+fi
 # -------------------------------
 # Install Odoo
 # -------------------------------
