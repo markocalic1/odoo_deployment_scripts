@@ -89,7 +89,11 @@ sudo -u postgres createuser -s $PG_USER || true
 # -------------------------------
 
 echo "[3/9] Creating system user and folder structure..."
-adduser --system --quiet --shell=/bin/bash --home $OE_HOME --group $OE_USER || true
+if id "$OE_USER" >/dev/null 2>&1; then
+    echo "System user $OE_USER already exists."
+else
+    adduser --system --quiet --shell=/bin/bash --home $OE_HOME --group $OE_USER
+fi
 
 mkdir -p $OE_HOME/log
 mkdir -p $OE_HOME/src
@@ -105,12 +109,18 @@ chown -R $OE_USER:$OE_USER $OE_HOME
 echo "[4/9] Processing custom addons repository..."
 
 if [ -n "$REPO_URL" ]; then
-    echo "→ Cloning custom modules..."
-    sudo -u $OE_USER git clone -b $BRANCH $REPO_URL $OE_HOME/src
+    if [ ! -d "$OE_HOME/src/.git" ]; then
+        echo "→ Cloning custom modules..."
+        sudo -u $OE_USER git clone -b $BRANCH $REPO_URL $OE_HOME/src
+    else
+        echo "→ Custom repo exists, updating..."
+        cd $OE_HOME/src
+        sudo -u $OE_USER git fetch origin $BRANCH
+        sudo -u $OE_USER git reset --hard origin/$BRANCH
+    fi
 else
     echo "→ No repo provided, skipping custom modules."
 fi
-
 
 # -------------------------------
 # Install wkhtmltopdf (optional)
@@ -139,16 +149,29 @@ fi
 # Install Odoo core
 # -------------------------------
 
-echo "[5/9] Downloading Odoo $OE_VERSION..."
-sudo -u $OE_USER git clone --depth 1 -b $OE_VERSION https://github.com/odoo/odoo.git $OE_HOME/odoo
+echo "[5/9] Installing or updating Odoo source..."
 
+if [ ! -d "$OE_HOME/odoo/.git" ]; then
+    echo "→ Odoo directory empty, cloning fresh..."
+    sudo -u $OE_USER git clone --depth 1 -b $OE_VERSION https://github.com/odoo/odoo.git $OE_HOME/odoo
+else
+    echo "→ Odoo directory exists, pulling latest changes..."
+    cd $OE_HOME/odoo
+    sudo -u $OE_USER git fetch --depth 1 origin $OE_VERSION
+    sudo -u $OE_USER git reset --hard origin/$OE_VERSION
+fi
 
 # -------------------------------
 # Python venv setup
 # -------------------------------
 
 echo "[6/9] Creating virtualenv..."
-python3 -m venv $OE_HOME/venv
+if [ ! -d "$OE_HOME/venv" ]; then
+    echo "→ Creating new virtualenv..."
+    python3 -m venv $OE_HOME/venv
+else
+    echo "→ Virtualenv already exists, reusing..."
+fi
 $OE_HOME/venv/bin/pip install --upgrade pip wheel
 
 
