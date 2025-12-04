@@ -7,11 +7,12 @@ set -e
 # Usage:
 #   ./cloudflare_dns.sh sub.domain.com
 #
-# Automatically:
-#  ✓ Loads/saves Cloudflare token
-#  ✓ Detects zone
+# Features:
+#  ✓ Loads/saves Cloudflare API Token
+#  ✓ Verifies token validity + permissions
+#  ✓ Detects zone ID
 #  ✓ Checks if A-record exists
-#  ✓ Creates DNS A record if not present
+#  ✓ Creates DNS A record if missing
 #  ✓ Uses server public IP
 ###############################################
 
@@ -35,7 +36,7 @@ echo "Server IP:     $SERVER_IP"
 echo "----------------------------------------------"
 
 # ---------------------------------------------------------
-# 1. Check token or ask user
+# 1. Load or ask for token
 # ---------------------------------------------------------
 if [ ! -f "$CF_TOKEN_FILE" ]; then
     echo "⚠ No Cloudflare token found at $CF_TOKEN_FILE"
@@ -57,7 +58,31 @@ fi
 CF_TOKEN=$(cat "$CF_TOKEN_FILE")
 
 # ---------------------------------------------------------
-# 2. GET ZONE ID
+# 2. VERIFY TOKEN BEFORE ANYTHING ELSE
+# ---------------------------------------------------------
+echo "Verifying Cloudflare API Token..."
+
+VERIFY_RESPONSE=$(curl -s -X GET \
+    "https://api.cloudflare.com/client/v4/user/tokens/verify" \
+    -H "Authorization: Bearer $CF_TOKEN" \
+    -H "Content-Type: application/json")
+
+echo "Token verify response: $VERIFY_RESPONSE"
+
+if ! echo "$VERIFY_RESPONSE" | grep -q '"success":true'; then
+    echo "❌ ERROR: Cloudflare token is invalid or unauthorized."
+    echo "Make sure you created an API Token (not Global API Key)"
+    echo "Required permissions:"
+    echo "  - Zone:Read"
+    echo "  - DNS:Read"
+    echo "  - DNS:Edit"
+    exit 1
+fi
+
+echo "✓ Token verified successfully"
+
+# ---------------------------------------------------------
+# 3. GET ZONE ID
 # ---------------------------------------------------------
 echo "Checking Cloudflare zone..."
 
@@ -77,7 +102,7 @@ fi
 echo "✓ Zone ID: $ZONE_ID"
 
 # ---------------------------------------------------------
-# 3. CHECK IF RECORD ALREADY EXISTS
+# 4. CHECK IF RECORD ALREADY EXISTS
 # ---------------------------------------------------------
 echo "Checking if DNS record already exists..."
 
@@ -95,7 +120,7 @@ fi
 echo "✓ No existing record found. Creating..."
 
 # ---------------------------------------------------------
-# 4. CREATE DNS RECORD
+# 5. CREATE DNS RECORD
 # ---------------------------------------------------------
 CREATE_RESPONSE=$(curl -s -X POST \
     "https://api.cloudflare.com/client/v4/zones/$ZONE_ID/dns_records" \
