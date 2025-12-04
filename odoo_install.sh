@@ -41,7 +41,14 @@ SERVICE_NAME=${SERVICE_NAME:-$OE_USER}
 read -p "Port [8069]: " OE_PORT
 OE_PORT=${OE_PORT:-8069}
 
-OE_PORT=${OE_PORT:-8069}
+read -p "Install wkhtmltopdf [Y/n]: " INSTALL_WKHTMLTOPDF
+INSTALL_WKHTMLTOPDF=${INSTALL_WKHTMLTOPDF:-Y}
+
+if [[ "$INSTALL_WKHTMLTOPDF" =~ ^[Yy]$ ]]; then
+    INSTALL_WKHTMLTOPDF="True"
+else
+    INSTALL_WKHTMLTOPDF="False"
+fi
 
 echo "---------------------------------------------------------"
 echo "System user:        $OE_USER"
@@ -53,6 +60,7 @@ echo "Odoo version:       $OE_VERSION"
 echo "Config file:        $CONF_NAME"
 echo "Service name:       $SERVICE_NAME"
 echo "Odoo port:          $OE_PORT"
+echo "Install wkhtmltopdf:$INSTALL_WKHTMLTOPDF"
 echo "---------------------------------------------------------"
 sleep 2
 
@@ -60,27 +68,27 @@ sleep 2
 # Install dependencies
 # -------------------------------
 
-echo "[1/8] Installing system packages..."
+echo "[1/9] Installing system packages..."
 apt update
 apt install -y git python3 python3-pip python3-venv \
     postgresql postgresql-contrib \
     build-essential libpq-dev libxml2-dev libxslt1-dev zlib1g-dev \
-    libldap2-dev libsasl2-dev libjpeg-dev libfreetype6-dev libssl-dev \
-    wkhtmltopdf
+    libldap2-dev libsasl2-dev libjpeg-dev libfreetype6-dev libssl-dev
+
 
 # -------------------------------
 # PostgreSQL setup
 # -------------------------------
 
-echo "[2/8] Creating PostgreSQL user..."
+echo "[2/9] Creating PostgreSQL user..."
 sudo -u postgres createuser -s $PG_USER || true
+
 
 # -------------------------------
 # Create user and directories
 # -------------------------------
 
-echo "[3/8] Creating system user and folder structure..."
-
+echo "[3/9] Creating system user and folder structure..."
 adduser --system --quiet --shell=/bin/bash --home $OE_HOME --group $OE_USER || true
 
 mkdir -p $OE_HOME/log
@@ -89,11 +97,12 @@ mkdir -p $OE_HOME/odoo
 
 chown -R $OE_USER:$OE_USER $OE_HOME
 
+
 # -------------------------------
-# Clone your repo
+# Clone your repo (optional)
 # -------------------------------
 
-echo "[4/8] Processing custom addons repository..."
+echo "[4/9] Processing custom addons repository..."
 
 if [ -n "$REPO_URL" ]; then
     echo "→ Cloning custom modules..."
@@ -101,22 +110,53 @@ if [ -n "$REPO_URL" ]; then
 else
     echo "→ No repo provided, skipping custom modules."
 fi
+
+
 # -------------------------------
-# Install Odoo
+# Install wkhtmltopdf (optional)
 # -------------------------------
 
-echo "[5/8] Downloading Odoo $OE_VERSION..."
+if [ "$INSTALL_WKHTMLTOPDF" = "True" ]; then
+  echo "=== Installing wkhtmltopdf (0.12.6.1 - patched Qt) ==="
+
+  cd /tmp
+  sudo wget -O wkhtml.deb \
+    https://github.com/wkhtmltopdf/packaging/releases/download/0.12.6.1-2/wkhtmltox_0.12.6.1-2.jammy_amd64.deb
+
+  sudo apt install -y ./wkhtml.deb
+  rm wkhtml.deb
+
+  sudo ln -sf /usr/local/bin/wkhtmltopdf /usr/bin/wkhtmltopdf
+  sudo ln -sf /usr/local/bin/wkhtmltoimage /usr/bin/wkhtmltoimage
+
+  echo "wkhtmltopdf installed successfully!"
+else
+  echo "wkhtmltopdf installation skipped."
+fi
+
+
+# -------------------------------
+# Install Odoo core
+# -------------------------------
+
+echo "[5/9] Downloading Odoo $OE_VERSION..."
 sudo -u $OE_USER git clone --depth 1 -b $OE_VERSION https://github.com/odoo/odoo.git $OE_HOME/odoo
+
 
 # -------------------------------
 # Python venv setup
 # -------------------------------
 
-echo "[6/8] Creating virtualenv..."
+echo "[6/9] Creating virtualenv..."
 python3 -m venv $OE_HOME/venv
 $OE_HOME/venv/bin/pip install --upgrade pip wheel
 
-echo "[7/8] Installing Odoo requirements..."
+
+# -------------------------------
+# Install requirements
+# -------------------------------
+
+echo "[7/9] Installing Odoo requirements..."
 $OE_HOME/venv/bin/pip install -r $OE_HOME/odoo/requirements.txt
 
 if [ -f "$OE_HOME/src/requirements.txt" ]; then
@@ -124,11 +164,12 @@ if [ -f "$OE_HOME/src/requirements.txt" ]; then
   $OE_HOME/venv/bin/pip install -r $OE_HOME/src/requirements.txt
 fi
 
+
 # -------------------------------
 # Configuration
 # -------------------------------
 
-echo "[8/8] Generating configuration file..."
+echo "[8/9] Generating configuration file..."
 
 ADMIN_PASS=$(openssl rand -hex 16)
 
@@ -148,11 +189,12 @@ EOF
 chown $OE_USER:$OE_USER /etc/$CONF_NAME
 chmod 640 /etc/$CONF_NAME
 
+
 # -------------------------------
 # Systemd service
 # -------------------------------
 
-echo "Creating systemd service..."
+echo "[9/9] Creating systemd service..."
 
 cat <<EOF >/etc/systemd/system/$SERVICE_NAME.service
 [Unit]
