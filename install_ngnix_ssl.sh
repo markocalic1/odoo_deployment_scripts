@@ -3,34 +3,32 @@ set -e
 
 ###############################################################################
 # SMART NGINX + SSL INSTALLER FOR ODOO
-# - Auto-detect Odoo service, config, port, longpolling
-# - DNS Mode: Cloudflare / Manual / Skip
-# - ACME HTTP challenge, then HTTPS config
-# - Cloudflare-friendly, idempotent
+# • Auto-detect Odoo service, config, port, longpolling port
+# • Supports IPv4, IPv6 or dual-stack
+# • Auto or manual DNS mode (with instructions)
+# • Cloudflare DNS integration
+# • Two-phase: ACME HTTP -> Final HTTPS config
 ###############################################################################
 
 echo "============== SMART NGINX + SSL INSTALLER =============="
 
-# ---------------------------------------------------------
-#  AUTO-DETECT SYSTEMD SERVICES
-# ---------------------------------------------------------
-
+###############################################################################
+# STEP 1 – DETECT ODOO SYSTEMD SERVICE
+###############################################################################
 echo "Finding installed Odoo systemd services..."
 
 SERVICES_FOUND=($(ls /etc/systemd/system/ | grep -E '^odoo.*\.service$' | sed 's/.service//'))
 
 if [ ${#SERVICES_FOUND[@]} -eq 0 ]; then
-    echo "❌ No Odoo services detected. Please enter manually."
+    echo "❌ No Odoo services detected. Enter manually:"
     read -p "Systemd Odoo service name: " SERVICE_NAME
 else
     echo "Detected Odoo services:"
     printf ' - %s\n' "${SERVICES_FOUND[@]}"
-
     read -p "Select service [${SERVICES_FOUND[0]}]: " SERVICE_NAME
     SERVICE_NAME=${SERVICE_NAME:-${SERVICES_FOUND[0]}}
 fi
 
-echo "✓ Using service: $SERVICE_NAME"
 SERVICE_FILE="/etc/systemd/system/$SERVICE_NAME.service"
 
 if [ ! -f "$SERVICE_FILE" ]; then
@@ -38,168 +36,127 @@ if [ ! -f "$SERVICE_FILE" ]; then
     exit 1
 fi
 
-# ---------------------------------------------------------
-#  AUTO-DETECT ODOO CONFIG FILE
-# ---------------------------------------------------------
+echo "✓ Using service: $SERVICE_NAME"
 
+###############################################################################
+# STEP 2 – DETECT ODOO CONFIG
+###############################################################################
 ODOO_CONFIG=$(sed -n 's/.*-c[[:space:]]\+\([^[:space:]]\+\).*/\1/p' "$SERVICE_FILE" | head -n1)
 
-if [ -z "$ODOO_CONFIG" ] || [ ! -f "$ODOO_CONFIG" ]; then
-    echo "❌ Could not detect Odoo config file from service."
-    read -p "Enter config file path manually: " ODOO_CONFIG
-fi
-
 if [ ! -f "$ODOO_CONFIG" ]; then
-    echo "❌ ERROR: Config file does not exist: $ODOO_CONFIG"
+    echo "❌ Could not detect Odoo config automatically."
+    read -p "Enter config file path: " ODOO_CONFIG
+fi
+if [ ! -f "$ODOO_CONFIG" ]; then
+    echo "❌ ERROR: Config file missing: $ODOO_CONFIG"
     exit 1
 fi
 
 echo "✓ Odoo config detected: $ODOO_CONFIG"
 
-# ---------------------------------------------------------
-#  AUTO-DETECT HTTP PORT
-# ---------------------------------------------------------
-
+###############################################################################
+# STEP 3 – DETECT PORTS
+###############################################################################
 ODOO_PORT=$(sed -n 's/^[[:space:]]*http_port[[:space:]]*=[[:space:]]*\([0-9]\+\).*/\1/p' "$ODOO_CONFIG" | head -n1)
-
-if [ -z "$ODOO_PORT" ]; then
-    read -p "Odoo port not found in config. Enter manually [8069]: " ODOO_PORT
-    ODOO_PORT=${ODOO_PORT:-8069}
-fi
-
+ODOO_PORT=${ODOO_PORT:-8069}
 echo "✓ Odoo port: $ODOO_PORT"
 
-# ---------------------------------------------------------
-#  LONGPOLLING PORT
-# ---------------------------------------------------------
+LONGPOLLING_PORT=$(sed -n 's/^[[:space:]]*longpolling_port[[:space:]]*=[[:space:]]*\([0-9]\+\).*/\1/p' "$ODOO_CONFIG" | head -n1)
+LONGPOLLING_PORT=${LONGPOLLING_PORT:-8072}
+echo "✓ Longpolling port: $LONGPOLLING_PORT"
 
-LONGPOLLING_PORT=$(sed -n 's/^[[:space:]]*longpolling_port[[:space:]]*=[[:space:]]*\([0-9]\+\).*/\1/p' "$ODOO_CONFIG")
+###############################################################################
+# STEP 4 – ASK FOR DOMAIN
+###############################################################################
+read -p "Domain for this Odoo instance (example: erp.company.com): " DOMAIN
+if [ -z "$DOMAIN" ]; then echo "❌ Domain required"; exit 1; fi
 
-if [ -z "$LONGPOLLING_PORT" ]; then
-    LONGPOLLING_PORT=8072
-    echo "⚠ longpolling_port missing → using default 8072"
+###############################################################################
+# STEP 5 – CHOOSE IP MODE (IPv4/IPv6)
+###############################################################################
+echo ""
+echo "---------------------------------------"
+echo "   DNS Configuration Mode"
+echo "---------------------------------------"
+echo "1) IPv4 only (A)"
+echo "2) IPv6 only (AAAA)"
+echo "3) Dual stack (A + AAAA)"
+read -p "Choose [1/2/3] (default 1): " IP_MODE
+IP_MODE=${IP_MODE:-1}
+
+SERVER_IPV4=$(curl -4 -s ifconfig.me || true)
+SERVER_IPV6=$(curl -6 -s ifconfig.me || true)
+
+[[ "$SERVER_IPV4" =~ ^([0-9]{1,3}\.){3}[0-9]{1,3}$ ]] || SERVER_IPV4=""
+[[ "$SERVER_IPV6" =~ : ]] || SERVER_IPV6=""
+
+manual_dns_instructions() {
+    echo ""
+    echo "================ MANUAL DNS MODE ================"
+    echo "Create these DNS records:"
+    echo ""
+
+    if [[ "$IP_MODE" == "1" || "$IP_MODE" == "3" ]] && [[ -n "$SERVER_IPV4" ]]; then
+        echo " A record:"
+        echo "   Name: $DOMAIN"
+        echo "   Value: $SERVER_IPV4"
+    fi
+
+    if [[ "$IP_MODE" == "2" || "$IP_MODE" == "3" ]] && [[ -n "$SERVER_IPV6" ]]; then
+        echo ""
+        echo " AAAA record:"
+        echo "   Name: $DOMAIN"
+        echo "   Value: $SERVER_IPV6"
+    fi
+
+    echo ""
+    echo "After creating DNS records, wait 1–3 minutes,"
+    echo "then continue installation."
+    echo "================================================="
+}
+
+###############################################################################
+# STEP 6 – CLOUDFLARE DNS AUTO MODE
+###############################################################################
+read -p "Automatically create Cloudflare DNS records? [Y/n]: " CF_AUTO
+CF_AUTO=${CF_AUTO:-Y}
+
+if [[ "$CF_AUTO" =~ ^[Yy]$ ]]; then
+    echo "→ Running Cloudflare DNS script..."
+    if ! bash cloudflare_dns.sh "$DOMAIN" "$IP_MODE"; then
+        echo "⚠ Cloudflare failed. Switching to manual DNS."
+        manual_dns_instructions
+        read -p "Press ENTER when DNS is configured..."
+    fi
 else
-    echo "✓ Longpolling port: $LONGPOLLING_PORT"
+    echo "→ You selected manual DNS mode."
+    manual_dns_instructions
+    read -p "Press ENTER when DNS is configured..."
 fi
 
-# ---------------------------------------------------------
-#  ASK FOR DOMAIN
-# ---------------------------------------------------------
-
-read -p "Domain for this Odoo instance (example: erp.example.com): " DOMAIN
-
-if [ -z "$DOMAIN" ]; then
-    echo "❌ Domain is required."
-    exit 1
-fi
-
-# ---------------------------------------------------------
-#  DNS MODE SELECTION
-# ---------------------------------------------------------
-
-echo ""
-echo "DNS Handling Options:"
-echo "1) Auto-manage DNS via Cloudflare"
-echo "2) Manual DNS (you create A-record yourself)"
-echo "3) Skip DNS (no SSL)"
-read -p "Choose DNS mode [1/2/3]: " DNS_MODE
-DNS_MODE=${DNS_MODE:-2}
-
-echo ""
-
-SKIP_SSL=false
-
-case $DNS_MODE in
-    1)
-        echo "→ Using Cloudflare DNS automation"
-        bash cloudflare_dns.sh "$DOMAIN"
-        ;;
-    2)
-        echo "--------------------------------------------"
-        echo "🔧 MANUAL DNS MODE SELECTED"
-        echo "Create this DNS A-record:"
-        echo ""
-        echo "Host: $DOMAIN"
-        echo "Type: A"
-        echo "Value: $(curl -s ifconfig.me)"
-        echo ""
-        echo "Press ENTER when DNS is created..."
-        echo "--------------------------------------------"
-        read
-        ;;
-    3)
-        echo "⚠ Skipping DNS + SSL setup"
-        SKIP_SSL=true
-        ;;
-    *)
-        echo "❌ Invalid selection"
-        exit 1
-        ;;
-esac
-
-echo ""
-echo "---------------------------------------------------------"
-echo "Domain:        $DOMAIN"
-echo "Service name:  $SERVICE_NAME"
-echo "Config file:   $ODOO_CONFIG"
-echo "Odoo port:     $ODOO_PORT"
-echo "Longpolling:   $LONGPOLLING_PORT"
-echo "DNS Mode:      $DNS_MODE"
-echo "---------------------------------------------------------"
-sleep 2
-
-UPSTREAM_PREFIX=$(echo "$DOMAIN" | tr '.-' '_')
-
-# ---------------------------------------------------------
-#  INSTALL NGINX
-# ---------------------------------------------------------
-
-echo "[1/7] Installing NGINX..."
+###############################################################################
+# STEP 7 – INSTALL NGINX
+###############################################################################
+echo "[1/7] Installing Nginx..."
 apt update
 apt install -y nginx
 systemctl enable nginx
 systemctl start nginx
 
-mkdir -p /var/log/nginx/odoo
 mkdir -p /var/www/$DOMAIN
+mkdir -p /var/log/nginx/odoo
 
 NGINX_FILE="/etc/nginx/sites-available/$DOMAIN"
 
-# ---------------------------------------------------------
-#  IF SKIPPING SSL → CREATE SIMPLE HTTP CONFIG ONLY
-# ---------------------------------------------------------
-
-if [ "$SKIP_SSL" = true ]; then
-
-cat <<EOF > "$NGINX_FILE"
-server {
-    listen 80;
-    server_name $DOMAIN;
-
-    location / {
-        proxy_pass http://127.0.0.1:$ODOO_PORT;
-    }
-
-    location /longpolling {
-        proxy_pass http://127.0.0.1:$LONGPOLLING_PORT;
-    }
-}
-EOF
-
-ln -sf "$NGINX_FILE" /etc/nginx/sites-enabled/$DOMAIN
-nginx -t && systemctl reload nginx
-
-echo "✔ HTTP-only mode enabled"
-exit 0
-fi
-
-# ---------------------------------------------------------
-#  PHASE 1: TEMP HTTP CONFIG FOR CERTBOT
-# ---------------------------------------------------------
+###############################################################################
+# STEP 8 – TEMPORARY ACME CONFIG
+###############################################################################
+echo "[2/7] Creating ACME temporary config..."
 
 cat <<EOF > "$NGINX_FILE"
 server {
     listen 80;
+    listen [::]:80;
     server_name $DOMAIN;
 
     client_max_body_size 500M;
@@ -217,57 +174,67 @@ EOF
 ln -sf "$NGINX_FILE" /etc/nginx/sites-enabled/$DOMAIN
 rm -f /etc/nginx/sites-enabled/default
 
-nginx -t && systemctl reload nginx
-echo "✓ Temporary HTTP config loaded"
+nginx -t
+systemctl reload nginx
 
-# ---------------------------------------------------------
-#  SSL CERT GENERATION
-# ---------------------------------------------------------
-
-echo "[3/7] Installing Certbot..."
+###############################################################################
+# STEP 9 – LET'S ENCRYPT (CERTONLY)
+###############################################################################
+echo "[3/7] Generating SSL certificate..."
 apt install -y certbot python3-certbot-nginx
 
-echo "Requesting certificate..."
 certbot certonly --nginx -d "$DOMAIN" --non-interactive --agree-tos -m admin@$DOMAIN
-echo "✓ SSL certificate generated"
 
-# ---------------------------------------------------------
-#  PHASE 2: FULL HTTPS CONFIG
-# ---------------------------------------------------------
+###############################################################################
+# STEP 10 – FULL HTTPS CONFIG
+###############################################################################
+echo "[4/7] Creating full HTTPS config..."
+
+UPSTREAM_PREFIX=$(echo "$DOMAIN" | tr '.-' '_')
 
 cat <<EOF > "$NGINX_FILE"
 
-# Odoo upstreams
 upstream ${UPSTREAM_PREFIX}_backend {
     server 127.0.0.1:$ODOO_PORT;
 }
+
 upstream ${UPSTREAM_PREFIX}_longpolling {
     server 127.0.0.1:$LONGPOLLING_PORT;
 }
 
-# HTTP → HTTPS
 server {
     listen 80;
+    listen [::]:80;
     server_name $DOMAIN;
     return 301 https://\$host\$request_uri;
 }
 
-# HTTPS
 server {
     listen 443 ssl http2;
+    listen [::]:443 ssl http2;
     server_name $DOMAIN;
 
     ssl_certificate     /etc/letsencrypt/live/$DOMAIN/fullchain.pem;
     ssl_certificate_key /etc/letsencrypt/live/$DOMAIN/privkey.pem;
 
+    client_max_body_size 500M;
+
+    access_log /var/log/nginx/odoo/${DOMAIN}_access.log;
+    error_log  /var/log/nginx/odoo/${DOMAIN}_error.log;
+
     proxy_set_header Host \$host;
+    proxy_set_header X-Forwarded-Host \$host;
     proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
     proxy_set_header X-Forwarded-Proto \$scheme;
+    proxy_set_header X-Real-IP \$remote_addr;
 
-    client_max_body_size 500M;
+    proxy_read_timeout 720s;
+    proxy_connect_timeout 720s;
+    proxy_send_timeout 720s;
 
     location / {
         proxy_pass http://${UPSTREAM_PREFIX}_backend;
+        proxy_redirect off;
     }
 
     location /longpolling {
@@ -275,28 +242,90 @@ server {
     }
 
     location ~* /web/static/ {
+        proxy_cache_valid 200 90m;
         expires 864000;
         proxy_pass http://${UPSTREAM_PREFIX}_backend;
     }
 
     gzip on;
-    gzip_types text/css application/json application/javascript;
+    gzip_types text/css text/less text/plain text/xml application/xml application/json application/javascript;
 }
 EOF
 
-ln -sf "$NGINX_FILE" /etc/nginx/sites-enabled/$DOMAIN
-nginx -t && systemctl reload nginx
+nginx -t
+systemctl reload nginx
 
-# ---------------------------------------------------------
-#  ENSURE ODOO proxy_mode = True
-# ---------------------------------------------------------
+###############################################################################
+# STEP 11 – ENABLE PROXY MODE IN ODOO
+###############################################################################
+echo "[5/7] Ensuring proxy_mode is enabled..."
 
 if ! grep -q "^proxy_mode *= *True" "$ODOO_CONFIG"; then
     echo "proxy_mode = True" >> "$ODOO_CONFIG"
 fi
 
-systemctl restart "$SERVICE_NAME"
 
+###############################################################################
+# STEP X – FIREWALL CONFIGURATION (UFW)
+###############################################################################
+echo "[7/7] Configuring firewall..."
+# Install UFW if missing
+if ! command -v ufw >/dev/null 2>&1; then
+    sudo apt install -y ufw
+fi
+
+# Prevent firewall from locking SSH
+sudo ufw allow 22/tcp >/dev/null || true
+
+# Allow HTTP/HTTPS (Nginx profiles)
+sudo ufw allow 'Nginx Full'   >/dev/null || true
+sudo ufw allow 'Nginx HTTP'   >/dev/null || true
+sudo ufw allow 'Nginx HTTPS'  >/dev/null || true
+
+
+
+# Allow Odoo backend port only if user wants
+read -p "Allow direct access to Odoo port $ODOO_PORT (useful for debugging)? [y/N]: " ALLOW_ODOO
+ALLOW_ODOO=${ALLOW_ODOO:-N}
+
+if [[ "$ALLOW_ODOO" =~ ^[Yy]$ ]]; then
+    ufw allow $ODOO_PORT/tcp >/dev/null || true
+    echo "✓ Allowed Odoo port $ODOO_PORT"
+else
+    echo "✓ Skipped opening Odoo backend port"
+fi
+
+# Allow longpolling port only if needed
+read -p "Allow direct longpolling port $LONGPOLLING_PORT (rarely needed)? [y/N]: " ALLOW_LP
+ALLOW_LP=${ALLOW_LP:-N}
+
+if [[ "$ALLOW_LP" =~ ^[Yy]$ ]]; then
+    ufw allow $LONGPOLLING_PORT/tcp >/dev/null || true
+    echo "✓ Allowed longpolling port $LONGPOLLING_PORT"
+else
+    echo "✓ Skipped longpolling port"
+fi
+
+# Enable firewall without asking for confirmation
+sudo ufw --force enable
+
+echo "✓ Firewall configured successfully"
+echo "--------------------------------------"
+sudo ufw status verbose
+echo "--------------------------------------"
+
+
+###############################################################################
+# STEP 12 – RESTART SERVICES
+###############################################################################
+echo "[7/7] Restarting services..."
+
+systemctl restart "$SERVICE_NAME"
+systemctl reload nginx
+
+###############################################################################
+# DONE
+###############################################################################
 echo "================== DONE =================="
 echo "Domain:        https://$DOMAIN"
 echo "Odoo port:     $ODOO_PORT"
