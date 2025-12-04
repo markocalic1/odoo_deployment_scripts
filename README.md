@@ -1,191 +1,210 @@
-# Odoo Server Setup Scripts
 
-Automated scripts for installing and configuring Odoo instances on Ubuntu servers (20.04 / 22.04 / 24.04).  
-These scripts allow quick, consistent, and repeatable setup of:
+# Odoo Deployment Scripts (Professional CI/CD)
 
-- Odoo Community (19.0, 20.0, master…)
-- PostgreSQL users and databases
-- Python virtual environments
-- Systemd services
-- Nginx reverse proxy
-- Let's Encrypt SSL certificates
-- Cloudflare‑friendly configurations
-
-One installer can create production, staging, and development instances with zero modifications.
+This repository contains production‑grade deployment automation for Odoo 19+ servers without Docker.
+It provides fully automated SSH‑based deployments triggered via GitHub Actions, with backup, rollback,
+health‑checks, Cloudflare DNS helper scripts, Nginx SSL automation, and environment‑based multi‑instance support.
 
 ---
 
-## 📦 Repository Contents
+## 🚀 Features
 
-| Script | Description |
+### ✅ Full Odoo Deploy Pipeline
+- Git pull via SSH
+- Automatic requirements installation
+- Database & code backup before every deploy
+- Auto rollback on failure
+- Health check on `/web/login`
+- Instance‑based `.env` configs
+- Detailed deploy logs per instance
+
+### ✅ CI/CD Ready (GitHub Actions)
+- Branch‑based deployment:
+  - `19.0-staging` → staging server
+  - `19.0` → production server
+- Secure deploy via SSH private key stored in GitHub secrets
+- Zero open ports — **no webhook listener needed**
+
+### ✅ Server‑Side Utilities
+- Cloudflare DNS auto‑creator (`cloudflare_dns.sh`)
+- Nginx + SSL installer (`install_nginx_ssl.sh`)
+- Odoo installation scripts (`odoo_install.sh`)
+- SSH key generator helper (`ssh_key_create.sh`)
+
+---
+
+## 📁 Directory Structure
+
+```
+odoo_deployment_scripts/
+│
+├── odoo_install.sh
+├── install_nginx_ssl.sh
+├── cloudflare_dns.sh
+├── deploy_odoo.sh
+├── ssh_key_create.sh
+└── README.md
+```
+
+---
+
+## ⚙️ Deploy Setup
+
+### 1. Create instance config
+
+Create file:
+
+```
+/etc/odoo_deploy/staging19.env
+```
+
+Example:
+
+```
+INSTANCE_NAME="staging19"
+
+OE_USER="odoo"
+OE_HOME="/opt/odoo"
+SERVICE_NAME="odoo"
+
+BRANCH="19.0-staging"
+
+DB_NAME="staging19"
+DB_USER="odoo"
+DB_HOST="localhost"
+DB_PORT="5432"
+
+ODOO_PORT="8069"
+```
+
+Production uses `BRANCH="19.0"`.
+
+---
+
+## 🚀 Deploy Script
+
+Use:
+
+```
+bash /opt/odoo/deploy_odoo.sh staging19
+```
+
+This will:
+- Backup DB + code
+- Pull updates
+- Install Python deps
+- Restart Odoo
+- Health check
+- Rollback on failure
+
+All logs stored in:
+
+```
+/opt/odoo/log/deploy_staging19.log
+```
+
+---
+
+## 🔐 GitHub CI/CD Integration
+
+Create GitHub secrets:
+
+| Secret | Description |
 |--------|-------------|
-| **install_odoo.sh** | Installs an Odoo instance (version of your choice), PostgreSQL user, virtualenv, systemd service |
-| **install_nginx_ssl.sh** | Sets up Nginx reverse proxy, applies SSL via Let’s Encrypt, auto‑enables `proxy_mode` |
-| **deploy.sh** *(optional)* | Pulls latest code and restarts services |
-| **backup.sh** *(optional)* | Backup script for PostgreSQL databases |
+| `SSH_PRIVATE_KEY` | Private key for SSH deploy |
+| `SSH_USER` | Usually `root` |
+| `SSH_HOST_STAGING` | Staging server IP |
+| `SSH_HOST_PROD` | Production server IP |
 
----
-
-## ⚙️ Requirements
-
-- Ubuntu 20.04 / 22.04 / 24.04  
-- Root or sudo access  
-- GitHub SSH key (for private repos)  
-- Cloudflare DNS A‑record pointing to the server IP (for SSL)  
-
----
-
-## 🚀 Installing an Odoo Instance
-
-### 1. Clone the scripts
-
-```bash
-git clone git@github.com:username/your-repo.git
-cd your-repo
-chmod +x install_odoo.sh
-chmod +x install_nginx_ssl.sh
-```
-
-### 2. Run the Odoo installer
-
-```bash
-sudo bash install_odoo.sh
-```
-
-You will be prompted for:
-
-- Odoo system user (e.g., `odoo19`)
-- Installation directory (e.g., `/opt/odoo19`)
-- Your custom modules repo URL
-- Git branch (`main`, `staging`, `dev`)
-- PostgreSQL username
-- Odoo version (`19.0`, `20.0`, `master`, ...)
-- Config file name (e.g., `odoo19.conf`)
-- Systemd service name (e.g., `odoo19`)
-- Port (default `8069`)
-
----
-
-## 🌍 Domain + SSL Setup (Nginx)
-
-### 1. Cloudflare DNS
-
-Create an A record:
-
-| Type | Name | Value | Proxy |
-|------|------|--------|--------|
-| A | erp | SERVER_IP | Proxied (orange) |
-
-### 2. Run SSL + Nginx setup
-
-```bash
-sudo bash install_nginx_ssl.sh
-```
-
-You will be prompted for:
-
-- Domain (e.g., `erp.example.com`)
-- Odoo port
-- Systemd service name
-
-The script will:
-
-- Install nginx  
-- Create reverse proxy config  
-- Generate Let’s Encrypt SSL  
-- Detect the Odoo config file  
-- Ensure `proxy_mode = True`  
-- Restart all services  
-
-Your instance will be available at:
+Example workflow:
 
 ```
-https://erp.example.com
+.github/workflows/deploy.yml
+```
+
+```yaml
+name: Odoo CI/CD Deploy
+
+on:
+  push:
+    branches:
+      - "19.0-staging"
+      - "19.0"
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup SSH
+        uses: webfactory/ssh-agent@v0.9.0
+        with:
+          ssh-private-key: ${{ secrets.SSH_PRIVATE_KEY }}
+
+      - name: Determine target environment
+        id: env
+        run: |
+          if [[ "${GITHUB_REF##*/}" == "19.0-staging" ]]; then
+            echo "target=staging" >> $GITHUB_OUTPUT
+          else
+            echo "target=prod" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Deploy to Staging
+        if: steps.env.outputs.target == 'staging'
+        run: |
+          ssh -o StrictHostKeyChecking=no ${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST_STAGING }}           "bash /opt/odoo/deploy_odoo.sh staging19"
+
+      - name: Deploy to Production
+        if: steps.env.outputs.target == 'prod'
+        run: |
+          ssh -o StrictHostKeyChecking=no ${{ secrets.SSH_USER }}@${{ secrets.SSH_HOST_PROD }}           "bash /opt/odoo/deploy_odoo.sh prod19"
 ```
 
 ---
 
-## 🧪 Example Production Installation
+## 🌐 Cloudflare DNS Helper
 
-```bash
-sudo bash install_odoo.sh
-# User: odoo19
-# Directory: /opt/odoo19
-# Repo: git@github.com:username/custom-addons.git
-# Branch: main
-# PostgreSQL user: odoo19
-# Odoo version: 19.0
-# Config: odoo19.conf
-# Service: odoo19
-# Port: 8069
+Use:
+
+```
+./cloudflare_dns.sh sub.domain.com
 ```
 
-## 🧪 Example Staging Installation
-
-```bash
-sudo bash install_odoo.sh
-# User: odoo19s
-# Directory: /opt/odoo19-staging
-# Branch: staging
-# Port: 8071
-```
-
-### SSL setup:
-
-```bash
-sudo bash install_nginx_ssl.sh
-# Domain: staging.example.com
-# Port: 8071
-# Service: odoo19s
-```
+Automatically:
+- Validates token
+- Loads/saves `/etc/cloudflare/api_token`
+- Detects zone
+- Creates A‑record only if missing
 
 ---
 
-## ☁️ Recommended Cloudflare Settings
+## 🔒 SSH Deploy Key Setup
 
-| Option | Value |
-|--------|--------|
-| SSL/TLS Mode | **Full (strict)** |
-| Always Use HTTPS | ON |
-| Auto Minify | ON |
-| Rocket Loader | OFF (for Odoo) |
-| Proxy | ON |
+Generate key:
 
----
-
-## 🛠 Optional: Deployment Script (deploy.sh)
-
-Typical workflow:
-
-```bash
-sudo bash deploy.sh odoo19
+```
+ssh-keygen -t ed25519 -f github_ci_key
 ```
 
-Tasks performed:
+Add `github_ci_key.pub` to GitHub → Deploy Keys.
 
-- Pull latest commit from repo
-- Install new Python dependencies (if any)
-- Restart Odoo systemd service
+Add private key to GitHub Secrets:
 
----
-
-## 🗄 Backup Script (backup.sh)
-
-If included, it supports:
-
-- Automatic PostgreSQL dumps
-- Optional upload to remote storage
-- Cron automation
-
----
-
-## 📜 License
-
-MIT License (recommended for scripts).  
-Update as needed.
+```
+SSH_PRIVATE_KEY
+```
 
 ---
 
 ## 💬 Support
 
-For improvements or issues, feel free to open a GitHub issue or PR.
+For improvements, ideas, or additional automation (Zero‑Downtime, multi‑repo deploy, asset builds, DB migrations), open an issue or contact the maintainer.
+
+---
+
+## 📄 License
+
+MIT
