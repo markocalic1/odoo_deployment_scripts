@@ -4,9 +4,9 @@ set -e
 ###############################################################################
 # SMART NGINX + SSL INSTALLER FOR ODOO
 # - Auto-detect Odoo service, config, port, longpolling port
-# - Includes advanced Nginx upstream setup
-# - Cloudflare-friendly
-# - idempotent
+# - Advanced Nginx upstream + longpolling + caching + gzip
+# - Two-phase: HTTP for certbot, then HTTPS with certs
+# - Cloudflare-friendly, idempotent
 ###############################################################################
 
 echo "============== SMART NGINX + SSL INSTALLER =============="
@@ -32,11 +32,6 @@ fi
 
 echo "✓ Using service: $SERVICE_NAME"
 
-
-# -------------------------------
-# Auto-detect config file from service
-# -------------------------------
-
 SERVICE_FILE="/etc/systemd/system/$SERVICE_NAME.service"
 
 if [ ! -f "$SERVICE_FILE" ]; then
@@ -44,35 +39,42 @@ if [ ! -f "$SERVICE_FILE" ]; then
     exit 1
 fi
 
-ODOO_CONFIG=$(grep -oP "(?<=-c ).+" "$SERVICE_FILE" | tr -d ' ')
+# -------------------------------
+# Auto-detect config file from service
+# -------------------------------
 
-if [ ! -f "$ODOO_CONFIG" ]; then
-    echo "❌ Could not detect config file."
+ODOO_CONFIG=$(sed -n 's/.*-c[[:space:]]\+\([^[:space:]]\+\).*/\1/p' "$SERVICE_FILE" | head -n1)
+
+if [ -z "$ODOO_CONFIG" ] || [ ! -f "$ODOO_CONFIG" ]; then
+    echo "❌ Could not detect Odoo config file from service."
     read -p "Enter config file path manually: " ODOO_CONFIG
 fi
 
-echo "✓ Odoo config detected: $ODOO_CONFIG"
+if [ ! -f "$ODOO_CONFIG" ]; then
+    echo "❌ ERROR: Config file does not exist: $ODOO_CONFIG"
+    exit 1
+fi
 
+echo "✓ Odoo config detected: $ODOO_CONFIG"
 
 # -------------------------------
 # Auto-detect Odoo port
 # -------------------------------
 
-ODOO_PORT=$(grep -oP "(?<=http_port *= *)[0-9]+" "$ODOO_CONFIG" || true)
+ODOO_PORT=$(sed -n 's/^[[:space:]]*http_port[[:space:]]*=[[:space:]]*\([0-9]\+\).*/\1/p' "$ODOO_CONFIG" | head -n1)
 
 if [ -z "$ODOO_PORT" ]; then
-    read -p "Odoo port not found. Enter manually [8069]: " ODOO_PORT
+    read -p "Odoo port not found in config. Enter manually [8069]: " ODOO_PORT
     ODOO_PORT=${ODOO_PORT:-8069}
 fi
 
 echo "✓ Odoo port: $ODOO_PORT"
 
-
 # -------------------------------
 # Auto-detect longpolling port
 # -------------------------------
 
-LONGPOLLING_PORT=$(grep -oP "(?<=longpolling_port *= *)[0-9]+" "$ODOO_CONFIG" || true)
+LONGPOLLING_PORT=$(sed -n 's/^[[:space:]]*longpolling_port[[:space:]]*=[[:space:]]*\([0-9]\+\).*/\1/p' "$ODOO_CONFIG" | head -n1)
 
 if [ -z "$LONGPOLLING_PORT" ]; then
     LONGPOLLING_PORT=8072
@@ -80,7 +82,6 @@ if [ -z "$LONGPOLLING_PORT" ]; then
 else
     echo "✓ Longpolling port: $LONGPOLLING_PORT"
 fi
-
 
 # -------------------------------
 # Ask for domain
@@ -93,7 +94,6 @@ if [ -z "$DOMAIN" ]; then
     exit 1
 fi
 
-
 echo "---------------------------------------------------------"
 echo "Domain:        $DOMAIN"
 echo "Service name:  $SERVICE_NAME"
@@ -103,6 +103,8 @@ echo "Longpolling:   $LONGPOLLING_PORT"
 echo "---------------------------------------------------------"
 sleep 2
 
+# Sanitize domain for upstream names
+UPSTREAM_PREFIX=$(echo "$DOMAIN" | tr '.-' '_')
 
 # -------------------------------
 # Install Nginx
@@ -114,28 +116,68 @@ apt install -y nginx
 systemctl enable nginx
 systemctl start nginx
 
-
-# -------------------------------
-# Nginx config (advanced)
-# -------------------------------
-
-echo "[2/7] Creating Nginx config..."
+mkdir -p /var/log/nginx/odoo
+mkdir -p /var/www/$DOMAIN
 
 NGINX_FILE="/etc/nginx/sites-available/$DOMAIN"
 
-mkdir -p /var/log/nginx/odoo
-mkdir -p /var/www/$DOMAIN
+# -----------------------------------------------
+# Phase 1: HTTP-only config (for Certbot)
+# -----------------------------------------------
+echo "[2/7] Creating temporary HTTP config for ACME..."
+
+cat <<EOF > "$NGINX_FILE"
+server {
+    listen 80;
+    server_name $DOMAIN;
+
+    client_max_body_size 500M;
+
+    location /.well-known/acme-challenge/ {
+        root /var/www/$DOMAIN;
+    }
+
+    location / {
+        return 301 http://\$host\$request_uri;
+    }
+}
+EOF
+
+ln -sf "$NGINX_FILE" /etc/nginx/sites-enabled/$DOMAIN
+rm -f /etc/nginx/sites-enabled/default
+
+nginx -t
+systemctl reload nginx
+echo "✓ HTTP config loaded (ACME-ready)"
+
+# -------------------------------
+# SSL via Certbot (certonly)
+# -------------------------------
+
+echo "[3/7] Installing Certbot + generating SSL certificate..."
+
+apt install -y certbot python3-certbot-nginx
+
+certbot certonly --nginx -d "$DOMAIN" --non-interactive --agree-tos -m admin@$DOMAIN
+
+echo "✓ SSL certificate generated"
+
+# -----------------------------------------------
+# Phase 2: Full HTTP + HTTPS advanced config
+# -----------------------------------------------
+
+echo "[4/7] Creating full HTTP+HTTPS Nginx config..."
 
 cat <<EOF > "$NGINX_FILE"
 
 # --------------------------
 # ODOO UPSTREAM BLOCKS
 # --------------------------
-upstream odoo_backend {
+upstream ${UPSTREAM_PREFIX}_odoo_backend {
     server 127.0.0.1:$ODOO_PORT;
 }
 
-upstream odoo_longpolling {
+upstream ${UPSTREAM_PREFIX}_odoo_longpolling {
     server 127.0.0.1:$LONGPOLLING_PORT;
 }
 
@@ -188,13 +230,13 @@ server {
 
     # Main Odoo backend
     location / {
-        proxy_pass http://odoo_backend;
+        proxy_pass http://${UPSTREAM_PREFIX}_odoo_backend;
         proxy_redirect off;
     }
 
     # Longpolling
     location /longpolling {
-        proxy_pass http://odoo_longpolling;
+        proxy_pass http://${UPSTREAM_PREFIX}_odoo_longpolling;
     }
 
     # Static assets caching
@@ -202,7 +244,7 @@ server {
         proxy_cache_valid 200 90m;
         proxy_buffering on;
         expires 864000;
-        proxy_pass http://odoo_backend;
+        proxy_pass http://${UPSTREAM_PREFIX}_odoo_backend;
     }
 
     # Gzip compression
@@ -211,33 +253,18 @@ server {
 }
 EOF
 
-echo "[3/7] Enabling Nginx config..."
-
 ln -sf "$NGINX_FILE" /etc/nginx/sites-enabled/$DOMAIN
 rm -f /etc/nginx/sites-enabled/default
 
 nginx -t
 systemctl reload nginx
-
-
-# -------------------------------
-# SSL via Certbot
-# -------------------------------
-
-echo "[4/7] Installing Certbot + generating SSL..."
-
-apt install -y certbot python3-certbot-nginx
-
-certbot --nginx -d "$DOMAIN" --non-interactive --agree-tos -m admin@$DOMAIN --redirect
-
-systemctl reload nginx
-
+echo "✓ Full HTTPS config active"
 
 # -------------------------------
 # Ensure proxy_mode = True
 # -------------------------------
 
-echo "[5/7] Ensuring 'proxy_mode = True'..."
+echo "[5/7] Ensuring 'proxy_mode = True' in Odoo config..."
 
 if grep -q "^proxy_mode *= *True" "$ODOO_CONFIG"; then
     echo "✓ proxy_mode already enabled"
@@ -246,12 +273,11 @@ else
     echo "✓ proxy_mode added"
 fi
 
-
 # -------------------------------
 # Restart services
 # -------------------------------
 
-echo "[6/7] Restarting services..."
+echo "[6/7] Restarting Odoo and Nginx..."
 
 systemctl restart "$SERVICE_NAME"
 systemctl reload nginx
