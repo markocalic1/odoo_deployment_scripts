@@ -13,7 +13,8 @@ if [ -z "$DOMAIN" ]; then
 fi
 
 CF_TOKEN_FILE="/etc/cloudflare/api_token"
-SERVER_IP=$(curl -s ifconfig.me)
+SERVER_IP=$(curl -4 -s ifconfig.me || curl -4 -s api.ipify.org)
+
 
 # ----------------------------------------------
 # Detect root domain (handles nested subdomains)
