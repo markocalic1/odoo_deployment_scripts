@@ -18,6 +18,7 @@ SKIP_FILESTORE="false"
 PROD_MASTER_PASS=""
 STAGING_MASTER_PASS=""
 DROP_METHOD="auto" # auto | odoo | pg
+SERVICE_WAS_STOPPED="false"
 
 PROD_DB_HOST=""
 PROD_DB_PORT=""
@@ -287,6 +288,9 @@ else
     }
 
     drop_via_pg() {
+        systemctl stop "$STAGING_SERVICE" || true
+        SERVICE_WAS_STOPPED="true"
+        sudo -u postgres psql -d postgres -c "SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname='${STAGING_DB}' AND pid <> pg_backend_pid();" >/dev/null 2>&1 || true
         sudo -u postgres dropdb --if-exists "$STAGING_DB"
     }
 
@@ -305,6 +309,12 @@ else
             echo "→ Odoo drop failed, trying PostgreSQL drop..."
             drop_via_pg || exit 1
         fi
+    fi
+
+    if [ "$SERVICE_WAS_STOPPED" == "true" ]; then
+        echo "→ Starting Odoo service before restore..."
+        systemctl start "$STAGING_SERVICE"
+        sleep 2
     fi
 
     restore_resp="$(mktemp)"
