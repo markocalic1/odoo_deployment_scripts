@@ -193,16 +193,14 @@ perform_odoo_backup() {
 
     read -p "Enter Odoo master password (production): " MASTER_PASS
 
-    curl -o "$BACKUP_DIR/${PROD_DB}.zip" \
-        -X POST "http://${PROD_HOST}:8069/web/database/backup" \
-        -F backup_format=zip \
-        -F master_pwd="$MASTER_PASS" \
-        -F name="$PROD_DB"
-
-    if [[ ! -f "$BACKUP_DIR/${PROD_DB}.zip" ]]; then
-        echo "❌ Odoo backup failed"
-        return 1
-    fi
+    ssh "$PROD_SSH" "
+        mkdir -p '$PROD_BACKUP_DIR';
+        curl -o '$PROD_BACKUP_DIR/${PROD_DB}.zip' \
+            -X POST 'http://127.0.0.1:8069/web/database/backup' \
+            -F backup_format=zip \
+            -F master_pwd='$MASTER_PASS' \
+            -F name='$PROD_DB';
+    " || return 1
 
     echo "✓ Odoo backup (ZIP) completed"
     return 0
