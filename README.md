@@ -25,6 +25,7 @@ Everything is built for professional Odoo consultants and teams who want **clean
 | `ssh_key_create.sh` | Generates SSH keys used for GitHub Actions deployment |
 | `odoo-sync.sh` | Sync prod → staging (DB + filestore) |
 | `odoo-backup-restore.sh` | Simple wrapper to run `odoo-sync.sh` with minimal args |
+| `odoo-update-modules.sh` | Update modules on local DB via odoo-bin |
 | `README.md` | Documentation |
 
 ---
@@ -247,6 +248,26 @@ sudo bash odoo-sync.sh \
 - If `--method odoo` is used, Odoo service on staging must be running.
 - If DB is locked, the script will stop the service and terminate sessions before drop.
 - If restore fails, check Odoo logs: `journalctl -u odoo -n 200`.
+
+---
+
+# 🟦 8. Update Modules (`odoo-update-modules.sh`)
+
+Update modules on a local instance database using `odoo-bin`.
+
+Usage:
+```
+sudo bash odoo-update-modules.sh <instance_name> <module1,module2>
+```
+
+Example:
+```
+sudo bash odoo-update-modules.sh staging19 sale,stock,account
+```
+
+Notes:
+- The script reads `/etc/odoo_deploy/<instance>.env` for `DB_NAME` and `OE_HOME`.
+- It stops the Odoo service, runs update, then starts the service.
 
 Triggers deployment:
 
