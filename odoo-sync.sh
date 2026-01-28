@@ -17,6 +17,7 @@ STAGING_SERVICE="odoo"
 SKIP_FILESTORE="false"
 PROD_MASTER_PASS=""
 STAGING_MASTER_PASS=""
+DROP_METHOD="auto" # auto | odoo | pg
 
 PROD_DB_HOST=""
 PROD_DB_PORT=""
@@ -46,6 +47,7 @@ while [[ "$#" -gt 0 ]]; do
         --no-filestore) SKIP_FILESTORE="true" ;;
         --prod-master-pass) PROD_MASTER_PASS="$2"; shift ;;
         --staging-master-pass) STAGING_MASTER_PASS="$2"; shift ;;
+        --drop-method) DROP_METHOD="$2"; shift ;;
         --method) RESTORE_METHOD="$2"; shift ;;  # restore method
         --backup-method) BACKUP_METHOD="$2"; shift ;;  # NEW
         *) echo "Unknown argument: $1"; exit 1 ;;
@@ -265,16 +267,63 @@ else
         read -p "Enter Staging master password: " STAGING_MASTER_PASS
     fi
 
-    echo "→ Dropping existing staging DB via Odoo endpoint (if exists)..."
-    curl -s -X POST "http://localhost:8069/web/database/drop" \
-        -F master_pwd="$STAGING_MASTER_PASS" \
-        -F name="$STAGING_DB" >/dev/null || true
+    drop_via_odoo() {
+        local drop_resp drop_code
+        drop_resp="$(mktemp)"
+        drop_code=$(curl -s -o "$drop_resp" -w "%{http_code}" -X POST "http://localhost:8069/web/database/drop" \
+            -F master_pwd="$STAGING_MASTER_PASS" \
+            -F name="$STAGING_DB")
+        if [ "$drop_code" -ge 400 ]; then
+            echo "⚠ Odoo drop failed (HTTP $drop_code)"
+            rm -f "$drop_resp"
+            return 1
+        fi
+        if grep -qi "Database deleted" "$drop_resp"; then
+            rm -f "$drop_resp"
+            return 0
+        fi
+        rm -f "$drop_resp"
+        return 1
+    }
 
-    curl -X POST "http://localhost:8069/web/database/restore" \
+    drop_via_pg() {
+        sudo -u postgres dropdb --if-exists "$STAGING_DB"
+    }
+
+    if [ "$DROP_METHOD" == "odoo" ]; then
+        echo "→ Dropping existing staging DB via Odoo endpoint..."
+        drop_via_odoo || {
+            echo "❌ Odoo drop failed"
+            exit 1
+        }
+    elif [ "$DROP_METHOD" == "pg" ]; then
+        echo "→ Dropping existing staging DB via PostgreSQL..."
+        drop_via_pg || exit 1
+    else
+        echo "→ Dropping existing staging DB (auto: Odoo → PostgreSQL)..."
+        if ! drop_via_odoo; then
+            echo "→ Odoo drop failed, trying PostgreSQL drop..."
+            drop_via_pg || exit 1
+        fi
+    fi
+
+    restore_resp="$(mktemp)"
+    restore_code=$(curl -s -o "$restore_resp" -w "%{http_code}" -X POST "http://localhost:8069/web/database/restore" \
         -F master_pwd="$STAGING_MASTER_PASS" \
         -F name="$STAGING_DB" \
         -F backup_file=@$BACKUP_DIR/${PROD_DB}.zip \
-        -F copy=true
+        -F copy=true)
+    if [ "$restore_code" -ge 400 ]; then
+        echo "❌ Odoo restore failed (HTTP $restore_code)"
+        rm -f "$restore_resp"
+        exit 1
+    fi
+    if grep -qi "Database restore error" "$restore_resp"; then
+        echo "❌ Odoo restore failed (see response from /web/database/restore)"
+        rm -f "$restore_resp"
+        exit 1
+    fi
+    rm -f "$restore_resp"
 fi
 
 
