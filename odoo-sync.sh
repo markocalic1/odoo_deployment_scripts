@@ -19,6 +19,8 @@ PROD_MASTER_PASS=""
 STAGING_MASTER_PASS=""
 DROP_METHOD="auto" # auto | odoo | pg
 SERVICE_WAS_STOPPED="false"
+PROD_MASTER_PASS_ENV="${PROD_MASTER_PASS:-${ODOO_PROD_MASTER_PASS:-}}"
+STAGING_MASTER_PASS_ENV="${STAGING_MASTER_PASS:-${ODOO_STAGING_MASTER_PASS:-}}"
 
 PROD_DB_HOST=""
 PROD_DB_PORT=""
@@ -199,6 +201,9 @@ perform_odoo_backup() {
     echo "→ Running Odoo endpoint backup..."
 
     if [ -z "$PROD_MASTER_PASS" ]; then
+        PROD_MASTER_PASS="$PROD_MASTER_PASS_ENV"
+    fi
+    if [ -z "$PROD_MASTER_PASS" ]; then
         read -p "Enter Odoo master password (production): " PROD_MASTER_PASS
     fi
 
@@ -264,6 +269,9 @@ if [[ "$RESTORE_METHOD" == "pg" ]]; then
 else
     echo "→ Performing Odoo restore via endpoint..."
 
+    if [ -z "$STAGING_MASTER_PASS" ]; then
+        STAGING_MASTER_PASS="$STAGING_MASTER_PASS_ENV"
+    fi
     if [ -z "$STAGING_MASTER_PASS" ]; then
         read -p "Enter Staging master password: " STAGING_MASTER_PASS
     fi

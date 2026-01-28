@@ -23,6 +23,8 @@ Everything is built for professional Odoo consultants and teams who want **clean
 | `cloudflare_dns.sh` | Auto-create DNS A-records via Cloudflare API |
 | `deploy_odoo.sh` | Zero-downtime deploy script with backup & rollback |
 | `ssh_key_create.sh` | Generates SSH keys used for GitHub Actions deployment |
+| `odoo-sync.sh` | Sync prod → staging (DB + filestore) |
+| `odoo-backup-restore.sh` | Simple wrapper to run `odoo-sync.sh` with minimal args |
 | `README.md` | Documentation |
 
 ---
@@ -198,6 +200,54 @@ SSH_PRIVATE_KEY
 
 # 🔥 6. GitHub Actions CI/CD Setup
 
+---
+
+# 🟫 7. Production → Staging Sync (`odoo-sync.sh`)
+
+This script can sync production DB + filestore to staging using:
+- `pg_dump` (fast, default), or
+- Odoo Web Backup endpoint (zip).
+
+### ✅ Recommended simple usage (no long args)
+
+Use the wrapper `odoo-backup-restore.sh` and store secrets in a separate file:
+
+Create `/etc/odoo_deploy/odoo-sync.env` (chmod 600):
+```
+PROD_HOST="23.88.117.155"
+PROD_SSH_USER="root"
+BACKUP_METHOD="odoo"   # or "pg"
+RESTORE_METHOD="odoo"  # or "pg"
+DROP_METHOD="auto"     # auto | odoo | pg
+NO_FILESTORE="false"
+
+# Master passwords (optional, avoids prompt)
+PROD_MASTER_PASS="your_production_master_password"
+STAGING_MASTER_PASS="your_staging_master_password"
+```
+
+Then run:
+```
+sudo bash odoo-backup-restore.sh 19
+```
+
+### ✅ Direct usage (full control)
+```
+sudo bash odoo-sync.sh \
+  --prod-env /etc/odoo_deploy/prod19.env \
+  --staging-env /etc/odoo_deploy/staging19.env \
+  --prod-host 23.88.117.155 \
+  --prod-ssh root \
+  --backup-method odoo \
+  --method odoo \
+  --drop-method auto
+```
+
+### ⚠ Notes
+- If `--method odoo` is used, Odoo service on staging must be running.
+- If DB is locked, the script will stop the service and terminate sessions before drop.
+- If restore fails, check Odoo logs: `journalctl -u odoo -n 200`.
+
 Triggers deployment:
 
 - When pushing to `19.0-staging` → deploy to staging  
@@ -292,4 +342,3 @@ Everything follows modern DevOps & Odoo best practices.
 
 MIT License  
 Feel free to use, modify, and improve!
-
