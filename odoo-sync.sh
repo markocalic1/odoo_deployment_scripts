@@ -325,11 +325,15 @@ else
         -F copy=true)
     if [ "$restore_code" -ge 400 ]; then
         echo "❌ Odoo restore failed (HTTP $restore_code)"
+        echo "---- Response ----"
+        sed -n '1,200p' "$restore_resp"
         rm -f "$restore_resp"
         exit 1
     fi
     if grep -qi "Database restore error" "$restore_resp"; then
         echo "❌ Odoo restore failed (see response from /web/database/restore)"
+        echo "---- Response ----"
+        sed -n '1,200p' "$restore_resp"
         rm -f "$restore_resp"
         exit 1
     fi
