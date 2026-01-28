@@ -15,6 +15,8 @@ PROD_BACKUP_DIR=""
 PROD_FS=""
 STAGING_SERVICE="odoo"
 SKIP_FILESTORE="false"
+PROD_MASTER_PASS=""
+STAGING_MASTER_PASS=""
 
 PROD_DB_HOST=""
 PROD_DB_PORT=""
@@ -42,6 +44,8 @@ while [[ "$#" -gt 0 ]]; do
         --prod-db-port) PROD_DB_PORT="$2"; shift ;;
         --prod-db-user) PROD_DB_USER="$2"; shift ;;
         --no-filestore) SKIP_FILESTORE="true" ;;
+        --prod-master-pass) PROD_MASTER_PASS="$2"; shift ;;
+        --staging-master-pass) STAGING_MASTER_PASS="$2"; shift ;;
         --method) RESTORE_METHOD="$2"; shift ;;  # restore method
         --backup-method) BACKUP_METHOD="$2"; shift ;;  # NEW
         *) echo "Unknown argument: $1"; exit 1 ;;
@@ -191,14 +195,16 @@ perform_pg_backup() {
 perform_odoo_backup() {
     echo "→ Running Odoo endpoint backup..."
 
-    read -p "Enter Odoo master password (production): " MASTER_PASS
+    if [ -z "$PROD_MASTER_PASS" ]; then
+        read -p "Enter Odoo master password (production): " PROD_MASTER_PASS
+    fi
 
     ssh "$PROD_SSH" "
         mkdir -p '$PROD_BACKUP_DIR';
         curl -o '$PROD_BACKUP_DIR/${PROD_DB}.zip' \
             -X POST 'http://127.0.0.1:8069/web/database/backup' \
             -F backup_format=zip \
-            -F master_pwd='$MASTER_PASS' \
+            -F master_pwd='$PROD_MASTER_PASS' \
             -F name='$PROD_DB';
     " || return 1
 
@@ -255,10 +261,12 @@ if [[ "$RESTORE_METHOD" == "pg" ]]; then
 else
     echo "→ Performing Odoo restore via endpoint..."
 
-    read -p "Enter Staging master password: " STAGING_PASS
+    if [ -z "$STAGING_MASTER_PASS" ]; then
+        read -p "Enter Staging master password: " STAGING_MASTER_PASS
+    fi
 
     curl -X POST "http://localhost:8069/web/database/restore" \
-        -F master_pwd="$STAGING_PASS" \
+        -F master_pwd="$STAGING_MASTER_PASS" \
         -F name="$STAGING_DB" \
         -F backup_file=@$BACKUP_DIR/${PROD_DB}.zip \
         -F copy=true
