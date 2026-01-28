@@ -30,6 +30,10 @@ if [ -z "$OE_HOME" ]; then
     echo "❌ OE_HOME not set in $CONFIG_FILE"
     exit 1
 fi
+if [ -z "$OE_USER" ]; then
+    echo "❌ OE_USER not set in $CONFIG_FILE"
+    exit 1
+fi
 
 SERVICE="${SERVICE_NAME:-odoo}"
 ODOO_BIN="$OE_HOME/odoo/odoo-bin"
@@ -68,7 +72,7 @@ echo "========================================="
 
 systemctl stop "$SERVICE" || true
 
-"$VENV_PY" "$ODOO_BIN" -c "$CONFIG_PATH" -d "$DB_NAME" -u "$MODULES" --stop-after-init
+sudo -u "$OE_USER" "$VENV_PY" "$ODOO_BIN" -c "$CONFIG_PATH" -d "$DB_NAME" -u "$MODULES" --stop-after-init
 
 systemctl start "$SERVICE"
 
