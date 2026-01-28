@@ -265,6 +265,11 @@ else
         read -p "Enter Staging master password: " STAGING_MASTER_PASS
     fi
 
+    echo "→ Dropping existing staging DB via Odoo endpoint (if exists)..."
+    curl -s -X POST "http://localhost:8069/web/database/drop" \
+        -F master_pwd="$STAGING_MASTER_PASS" \
+        -F name="$STAGING_DB" >/dev/null || true
+
     curl -X POST "http://localhost:8069/web/database/restore" \
         -F master_pwd="$STAGING_MASTER_PASS" \
         -F name="$STAGING_DB" \
