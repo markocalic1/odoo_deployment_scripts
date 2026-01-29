@@ -26,6 +26,9 @@ Everything is built for professional Odoo consultants and teams who want **clean
 | `odoo-sync.sh` | Sync prod → staging (DB + filestore) |
 | `odoo-backup-restore.sh` | Simple wrapper to run `odoo-sync.sh` with minimal args |
 | `odoo-update-modules.sh` | Update modules on local DB via odoo-bin |
+| `odoo-git-update.sh` | Git update with backup, stash, checks, and optional module update |
+| `odoo-sync-env-create.sh` | Create prod/staging env files for backup-restore sync |
+| `odooctl.sh` | Unified CLI entrypoint for daily operations |
 | `README.md` | Documentation |
 
 ---
@@ -171,6 +174,96 @@ This is the core deployment engine.
 ```
 bash deploy_odoo.sh staging19
 bash deploy_odoo.sh prod19
+```
+
+---
+
+# 🟫 4.1 Unified CLI (`odooctl.sh`)
+
+Use this as the **single entrypoint** for daily operations.
+
+### ▶️ Examples
+
+```
+./odooctl.sh deploy staging19
+./odooctl.sh git-update staging19 update -all
+./odooctl.sh modules staging19 sale,stock,account
+./odooctl.sh backup-restore 19
+./odooctl.sh backup-restore-env 19
+./odooctl.sh describe deploy
+```
+
+### 🔎 What does a command do?
+Use `describe` to see what a command does and which config/env files it reads:
+
+```
+./odooctl.sh describe git-update
+```
+
+---
+
+# 🟩 Daily Usage (Quick Guide)
+
+### 1) Safe deploy (recommended)
+```
+./odooctl.sh deploy <instance>
+```
+Does: DB + code backup → git reset to origin/<branch> → pip install → restart → health check → auto‑rollback on failure.
+
+### 2) Git update + optional module update
+```
+./odooctl.sh git-update <instance>
+./odooctl.sh git-update <instance> update -all
+./odooctl.sh git-update <instance> update sale,stock,account
+```
+
+### 3) Update modules only
+```
+./odooctl.sh modules <instance> sale,stock,account
+```
+
+### 4) Backup/restore prod -> staging
+```
+./odooctl.sh backup-restore <suffix>
+```
+
+### 5) Need help fast
+```
+./odooctl.sh --help
+./odooctl.sh describe deploy
+```
+
+---
+
+# 🟦 7. Bash Autocomplete (`odooctl-completion.bash`)
+
+Enable tab-completion for `odooctl` commands and instance names.
+
+### ▶️ Install (per-user)
+
+```
+echo 'source /home/calic/odoo-local/odoo_deployment_scripts/odooctl-completion.bash' >> ~/.bashrc
+source ~/.bashrc
+```
+
+### ▶️ Install (system-wide)
+
+```
+sudo cp /home/calic/odoo-local/odoo_deployment_scripts/odooctl-completion.bash /etc/bash_completion.d/odooctl
+```
+
+---
+
+# 🟨 6. Backup/Restore Env Helper (`odoo-sync-env-create.sh`)
+
+Generate the `prod<suffix>.env` and `staging<suffix>.env` files used by
+`odoo-backup-restore.sh` (and `./odooctl.sh backup-restore`).
+
+### ▶️ Usage
+
+```
+sudo bash odoo-sync-env-create.sh 19
+sudo bash odoo-sync-env-create.sh 19 --with-sync-env
 ```
 
 ---

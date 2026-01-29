@@ -1,0 +1,171 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Odoo Deployment Scripts – Quick Docs</title>
+    <style>
+      :root {
+        --bg: #f7f7f5;
+        --card: #ffffff;
+        --text: #1f2328;
+        --muted: #5b636a;
+        --accent: #1b6ef3;
+        --code: #0b1020;
+        --border: #e6e8eb;
+      }
+      body {
+        margin: 0;
+        font-family: "IBM Plex Sans", "Source Sans 3", "Segoe UI", Arial, sans-serif;
+        background: linear-gradient(180deg, #f7f7f5 0%, #eef2f6 100%);
+        color: var(--text);
+      }
+      .wrap {
+        max-width: 980px;
+        margin: 40px auto;
+        padding: 0 20px 60px;
+      }
+      header {
+        background: var(--card);
+        border: 1px solid var(--border);
+        border-radius: 16px;
+        padding: 24px 28px;
+        box-shadow: 0 10px 25px rgba(0,0,0,0.06);
+      }
+      h1 {
+        margin: 0 0 8px;
+        font-size: 28px;
+        letter-spacing: 0.2px;
+      }
+      p {
+        margin: 6px 0 0;
+        color: var(--muted);
+      }
+      section {
+        margin-top: 24px;
+        background: var(--card);
+        border: 1px solid var(--border);
+        border-radius: 16px;
+        padding: 22px 26px;
+        box-shadow: 0 10px 25px rgba(0,0,0,0.04);
+      }
+      h2 {
+        margin: 0 0 10px;
+        font-size: 20px;
+      }
+      code, pre {
+        font-family: "JetBrains Mono", "Fira Code", Consolas, "Courier New", monospace;
+      }
+      pre {
+        background: #0f172a;
+        color: #e5e7eb;
+        padding: 12px 14px;
+        border-radius: 10px;
+        overflow-x: auto;
+      }
+      .grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+        gap: 16px;
+        margin-top: 12px;
+      }
+      .card {
+        border: 1px solid var(--border);
+        border-radius: 12px;
+        padding: 14px 16px;
+        background: #fff;
+      }
+      .card h3 {
+        margin: 0 0 8px;
+        font-size: 16px;
+      }
+      .muted {
+        color: var(--muted);
+        font-size: 14px;
+      }
+      .tag {
+        display: inline-block;
+        padding: 2px 8px;
+        border-radius: 999px;
+        background: #e8f0ff;
+        color: #1b4dd1;
+        font-size: 12px;
+        margin-left: 6px;
+      }
+      @media (max-width: 640px) {
+        header, section { padding: 18px; }
+        h1 { font-size: 24px; }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="wrap">
+      <header>
+        <h1>Odoo Deployment Scripts – Quick Docs</h1>
+        <p>Daily usage cheat‑sheet for <code>odooctl.sh</code> and related scripts.</p>
+      </header>
+
+      <section>
+        <h2>Daily Usage (Quick Guide)</h2>
+        <div class="grid">
+          <div class="card">
+            <h3>Safe deploy <span class="tag">recommended</span></h3>
+            <pre><code>./odooctl.sh deploy &lt;instance&gt;</code></pre>
+            <div class="muted">Does: DB + code backup → git reset to origin/&lt;branch&gt; → pip install → restart → health check → auto‑rollback on failure.</div>
+          </div>
+          <div class="card">
+            <h3>Git update</h3>
+            <pre><code>./odooctl.sh git-update &lt;instance&gt;
+./odooctl.sh git-update &lt;instance&gt; update -all
+./odooctl.sh git-update &lt;instance&gt; update sale,stock,account</code></pre>
+            <div class="muted">Stash/restore, DB backup, requirements diff, syntax check; optional module update.</div>
+          </div>
+          <div class="card">
+            <h3>Update modules only</h3>
+            <pre><code>./odooctl.sh modules &lt;instance&gt; sale,stock,account</code></pre>
+            <div class="muted">Runs Odoo <code>-u</code> for selected modules.</div>
+          </div>
+          <div class="card">
+            <h3>Backup/restore prod → staging</h3>
+            <pre><code>./odooctl.sh backup-restore &lt;suffix&gt;</code></pre>
+            <div class="muted">Syncs production DB + filestore to staging.</div>
+          </div>
+          <div class="card">
+            <h3>Need help fast</h3>
+            <pre><code>./odooctl.sh --help
+./odooctl.sh describe deploy</code></pre>
+            <div class="muted">Shows what a command does and which config/env files it reads.</div>
+          </div>
+        </div>
+      </section>
+
+      <section>
+        <h2>Configuration Files</h2>
+        <div class="grid">
+          <div class="card">
+            <h3>Instance env</h3>
+            <pre><code>/etc/odoo_deploy/&lt;instance&gt;.env</code></pre>
+            <div class="muted">Used by deploy, git‑update, and modules commands.</div>
+          </div>
+          <div class="card">
+            <h3>Backup/restore env</h3>
+            <pre><code>/etc/odoo_deploy/prod&lt;suffix&gt;.env
+/etc/odoo_deploy/staging&lt;suffix&gt;.env</code></pre>
+            <div class="muted">Used by backup‑restore.</div>
+          </div>
+          <div class="card">
+            <h3>Optional sync defaults</h3>
+            <pre><code>/etc/odoo_deploy/odoo-sync.env</code></pre>
+            <div class="muted">Master passwords, default methods, SSH user.</div>
+          </div>
+        </div>
+      </section>
+
+      <section>
+        <h2>Autocomplete (Bash)</h2>
+        <pre><code>echo 'source /home/calic/odoo-local/odoo_deployment_scripts/odooctl-completion.bash' >> ~/.bashrc
+source ~/.bashrc</code></pre>
+      </section>
+    </div>
+  </body>
+</html>
