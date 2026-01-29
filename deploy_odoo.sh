@@ -56,6 +56,7 @@ log "→ Creating backup directory: $BACKUP_DIR"
 # 1. Database backup (optional)
 if [ -n "$DB_NAME" ]; then
     log "→ Dumping database: $DB_NAME"
+    PGPASSWORD="${DB_PASSWORD:-${DB_PASS:-}}" \
     pg_dump -U "$DB_USER" -h "$DB_HOST" -p "$DB_PORT" \
         -F c -b -f "${BACKUP_DIR}/${DB_NAME}.dump" "$DB_NAME" \
         >> "$DEPLOY_LOG" 2>&1 || log "⚠ DB backup failed (continuing)"
@@ -158,4 +159,3 @@ log "✓ DEPLOY SUCCESSFUL"
 log "============== END DEPLOY [$INSTANCE_NAME] =============="
 
 exit 0
-

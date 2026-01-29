@@ -295,6 +295,13 @@ You can set master passwords in:
 - `/etc/odoo_deploy/odoo-sync.env` (recommended), or
 - `prod*.env` / `staging*.env` using `MASTER_PASS` or `ODOO_MASTER_PASS`
 
+### Database Passwords (non-interactive pg_dump)
+If your DB user requires a password, add one of these keys to the instance env:
+- `DB_PASSWORD`, or
+- `DB_PASS`
+
+Then `deploy_odoo.sh` will use it for `pg_dump` without prompting.
+
 ---
 
 # 🟪 5. SSH Key Generator (`ssh_key_create.sh`)
