@@ -62,8 +62,13 @@ log "→ Creating backup directory: $BACKUP_DIR"
 if [ -n "$DB_NAME" ] && [ "$NO_DB_BACKUP" != "true" ]; then
     log "→ Dumping database: $DB_NAME"
 
+    PG_DUMP_ARGS=()
+    [ -n "$DB_USER" ] && PG_DUMP_ARGS+=("-U" "$DB_USER")
+    [ -n "$DB_HOST" ] && PG_DUMP_ARGS+=("-h" "$DB_HOST")
+    [ -n "$DB_PORT" ] && PG_DUMP_ARGS+=("-p" "$DB_PORT")
+
     do_pg_dump() {
-        PGPASSWORD="$1" pg_dump -U "$DB_USER" -h "$DB_HOST" -p "$DB_PORT" \
+        PGPASSWORD="$1" pg_dump "${PG_DUMP_ARGS[@]}" \
             -F c -b -f "${BACKUP_DIR}/${DB_NAME}.dump" "$DB_NAME" \
             >> "$DEPLOY_LOG" 2>&1
     }
