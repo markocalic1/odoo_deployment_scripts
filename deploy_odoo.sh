@@ -19,6 +19,11 @@ set -e
 #########################################################################
 
 INSTANCE_NAME="$1"
+NO_DB_BACKUP="false"
+
+if [ "$2" = "--no-db-backup" ] || [ "$2" = "no-db-backup" ]; then
+    NO_DB_BACKUP="true"
+fi
 
 if [ -z "$INSTANCE_NAME" ]; then
     echo "Usage: $0 <instance_name>"
@@ -54,14 +59,21 @@ log "============== START DEPLOY [$INSTANCE_NAME] =============="
 log "→ Creating backup directory: $BACKUP_DIR"
 
 # 1. Database backup (optional)
-if [ -n "$DB_NAME" ]; then
+if [ -n "$DB_NAME" ] && [ "$NO_DB_BACKUP" != "true" ]; then
     log "→ Dumping database: $DB_NAME"
     PGPASSWORD="${DB_PASSWORD:-${DB_PASS:-}}" \
     pg_dump -U "$DB_USER" -h "$DB_HOST" -p "$DB_PORT" \
         -F c -b -f "${BACKUP_DIR}/${DB_NAME}.dump" "$DB_NAME" \
-        >> "$DEPLOY_LOG" 2>&1 || log "⚠ DB backup failed (continuing)"
+        >> "$DEPLOY_LOG" 2>&1 || {
+            log "❌ DB backup failed"
+            exit 1
+        }
 else
-    log "ℹ No DB_NAME specified — DB backup skipped"
+    if [ "$NO_DB_BACKUP" = "true" ]; then
+        log "ℹ DB backup skipped (no-db-backup)"
+    else
+        log "ℹ No DB_NAME specified — DB backup skipped"
+    fi
 fi
 
 # 2. Code backup
