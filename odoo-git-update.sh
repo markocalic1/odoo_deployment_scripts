@@ -132,6 +132,10 @@ do_odoo_http_backup() {
         -F backup_format=zip \
         -F master_pwd="$MASTER_PASS_EFFECTIVE" \
         -F name="$DB_NAME" >>"$LOG_FILE" 2>&1)
+    if ! [[ "$HTTP_CODE" =~ ^[0-9]{3}$ ]]; then
+        log "[ERROR] Odoo HTTP backup failed (no HTTP code)"
+        return 1
+    fi
     if [ "$HTTP_CODE" -ge 400 ]; then
         log "[ERROR] Odoo HTTP backup failed (HTTP $HTTP_CODE)"
         return 1
@@ -141,7 +145,8 @@ do_odoo_http_backup() {
         return 1
     fi
     if [ "$(head -c 2 "$BACKUP_ZIP")" != "PK" ]; then
-        log "[ERROR] Odoo HTTP backup is not a ZIP file"
+        log "[ERROR] Odoo HTTP backup is not a ZIP file (see log for response)"
+        head -c 200 "$BACKUP_ZIP" >>"$LOG_FILE" 2>&1 || true
         return 1
     fi
 }
