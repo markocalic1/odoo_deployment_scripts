@@ -163,8 +163,21 @@
 
       <section>
         <h2>Autocomplete (Bash)</h2>
-        <pre><code>echo 'source /home/calic/odoo-local/odoo_deployment_scripts/odooctl-completion.bash' >> ~/.bashrc
+        <pre><code>echo 'source /path/to/odoo_deployment_scripts/odooctl-completion.bash' >> ~/.bashrc
 source ~/.bashrc</code></pre>
+      </section>
+
+      <section>
+        <h2>Run Without <code>./odooctl.sh</code></h2>
+        <p class="muted">Create a shortcut in your PATH, then you can run <code>odooctl</code> directly.</p>
+        <h3>System-wide (recommended)</h3>
+        <pre><code>sudo ln -sf /path/to/odoo_deployment_scripts/odooctl.sh /usr/local/bin/odooctl</code></pre>
+        <h3>User-only</h3>
+        <pre><code>mkdir -p ~/bin
+ln -sf /path/to/odoo_deployment_scripts/odooctl.sh ~/bin/odooctl
+echo 'export PATH="$HOME/bin:$PATH"' >> ~/.bashrc
+source ~/.bashrc</code></pre>
+        <pre><code>odooctl deploy &lt;instance&gt;</code></pre>
       </section>
     </div>
   </body>

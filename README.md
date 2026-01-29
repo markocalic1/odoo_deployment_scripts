@@ -235,6 +235,30 @@ Does: DB + code backup → git reset to origin/<branch> → pip install → rest
 
 ---
 
+# 🟦 Run Without `./odooctl.sh`
+
+Use a PATH shortcut so you can run `odooctl` directly.
+
+### ▶️ System-wide (recommended)
+```
+sudo ln -sf /path/to/odoo_deployment_scripts/odooctl.sh /usr/local/bin/odooctl
+```
+
+### ▶️ User-only
+```
+mkdir -p ~/bin
+ln -sf /path/to/odoo_deployment_scripts/odooctl.sh ~/bin/odooctl
+echo 'export PATH="$HOME/bin:$PATH"' >> ~/.bashrc
+source ~/.bashrc
+```
+
+Then run:
+```
+odooctl deploy <instance>
+```
+
+---
+
 # 🟦 7. Bash Autocomplete (`odooctl-completion.bash`)
 
 Enable tab-completion for `odooctl` commands and instance names.
@@ -242,14 +266,14 @@ Enable tab-completion for `odooctl` commands and instance names.
 ### ▶️ Install (per-user)
 
 ```
-echo 'source /home/calic/odoo-local/odoo_deployment_scripts/odooctl-completion.bash' >> ~/.bashrc
+echo 'source /path/to/odoo_deployment_scripts/odooctl-completion.bash' >> ~/.bashrc
 source ~/.bashrc
 ```
 
 ### ▶️ Install (system-wide)
 
 ```
-sudo cp /home/calic/odoo-local/odoo_deployment_scripts/odooctl-completion.bash /etc/bash_completion.d/odooctl
+sudo cp /path/to/odoo_deployment_scripts/odooctl-completion.bash /etc/bash_completion.d/odooctl
 ```
 
 ---
