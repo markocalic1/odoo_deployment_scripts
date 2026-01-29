@@ -43,6 +43,7 @@ TIMESTAMP=$(date +"%Y%m%d_%H%M%S")
 BACKUP_DIR="$OE_HOME/backups/${INSTANCE_NAME}/${TIMESTAMP}"
 DEPLOY_LOG="$OE_HOME/log/deploy_${INSTANCE_NAME}.log"
 BACKUP_METHOD="${BACKUP_METHOD:-pg}"
+FIX_REPO_PERMS="${FIX_REPO_PERMS:-true}"
 
 mkdir -p "$BACKUP_DIR"
 mkdir -p "$(dirname "$DEPLOY_LOG")"
@@ -186,6 +187,19 @@ REPO_PATH="${REPO_DIR:-$OE_HOME/src}"
 cd "$REPO_PATH"
 
 sudo -u "$OE_USER" git config --global --add safe.directory "$REPO_PATH" >>"$DEPLOY_LOG" 2>&1 || true
+
+if ! sudo -u "$OE_USER" test -w "$REPO_PATH/.git" 2>/dev/null; then
+    if [ "${FIX_REPO_PERMS:-false}" = "true" ]; then
+        log "⚠ Fixing repo permissions for $REPO_PATH (chown to $OE_USER)"
+        chown -R "$OE_USER:$OE_USER" "$REPO_PATH" >>"$DEPLOY_LOG" 2>&1 || {
+            log "❌ Cannot fix repo permissions (see log: $DEPLOY_LOG)"
+            exit 1
+        }
+    else
+        log "❌ Repo not writable by $OE_USER (set FIX_REPO_PERMS=true to auto-fix)"
+        exit 1
+    fi
+fi
 
 CURRENT_COMMIT=$(sudo -u "$OE_USER" git rev-parse HEAD)
 log "→ Current commit: $CURRENT_COMMIT"
