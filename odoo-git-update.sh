@@ -80,6 +80,8 @@ log "----------------------------------------"
 
 cd "$PROJECT_DIR"
 
+sudo -u "$OE_USER" git config --global --add safe.directory "$PROJECT_DIR" >>"$LOG_FILE" 2>&1 || true
+
 log "[INFO] DB backup..."
 sudo -u "$OE_USER" "$VENV_PY" "$ODOO_BIN" -c "$CONFIG_PATH" -d "$DB_NAME" \
     --save --stop-after-init --backup-dir "$BACKUP_DIR" \

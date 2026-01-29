@@ -85,6 +85,8 @@ fi
 REPO_PATH="${REPO_DIR:-$OE_HOME/src}"
 cd "$REPO_PATH"
 
+sudo -u "$OE_USER" git config --global --add safe.directory "$REPO_PATH" >>"$DEPLOY_LOG" 2>&1 || true
+
 CURRENT_COMMIT=$(sudo -u "$OE_USER" git rev-parse HEAD)
 log "→ Current commit: $CURRENT_COMMIT"
 
