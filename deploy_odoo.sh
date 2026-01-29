@@ -65,16 +65,25 @@ else
 fi
 
 # 2. Code backup
-log "→ Backing up code (odoo + src)"
-tar czf "${BACKUP_DIR}/code.tar.gz" -C "$OE_HOME" odoo src \
-    >> "$DEPLOY_LOG" 2>&1 || log "⚠ Code backup failed"
+if [ -n "$REPO_DIR" ]; then
+    log "→ Backing up code (odoo + repo: $REPO_DIR)"
+    tar czf "${BACKUP_DIR}/code.tar.gz" -C "$OE_HOME" odoo \
+        >> "$DEPLOY_LOG" 2>&1 || log "⚠ Code backup failed"
+    tar rf "${BACKUP_DIR}/code.tar.gz" -C "$(dirname "$REPO_DIR")" "$(basename "$REPO_DIR")" \
+        >> "$DEPLOY_LOG" 2>&1 || log "⚠ Repo backup failed"
+else
+    log "→ Backing up code (odoo + src)"
+    tar czf "${BACKUP_DIR}/code.tar.gz" -C "$OE_HOME" odoo src \
+        >> "$DEPLOY_LOG" 2>&1 || log "⚠ Code backup failed"
+fi
 
 
 #########################################################################
 # GIT UPDATE
 #########################################################################
 
-cd "$OE_HOME/src"
+REPO_PATH="${REPO_DIR:-$OE_HOME/src}"
+cd "$REPO_PATH"
 
 CURRENT_COMMIT=$(sudo -u "$OE_USER" git rev-parse HEAD)
 log "→ Current commit: $CURRENT_COMMIT"
@@ -93,7 +102,7 @@ log "→ New commit: $NEW_COMMIT"
 # PIP INSTALL
 #########################################################################
 
-REQ_FILE="$OE_HOME/src/requirements.txt"
+REQ_FILE="${REPO_DIR:-$OE_HOME/src}/requirements.txt"
 
 if [ -f "$REQ_FILE" ]; then
     log "→ Installing Python dependencies"

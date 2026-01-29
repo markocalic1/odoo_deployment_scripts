@@ -302,6 +302,13 @@ If your DB user requires a password, add one of these keys to the instance env:
 
 Then `deploy_odoo.sh` will use it for `pg_dump` without prompting.
 
+### Custom Repo Path (REPO_DIR)
+If your git repo is not in `$OE_HOME/src`, set:
+```
+REPO_DIR=/opt/odoo/src/your_repo
+```
+This is used by deploy and git-update scripts.
+
 ---
 
 # 🟪 5. SSH Key Generator (`ssh_key_create.sh`)

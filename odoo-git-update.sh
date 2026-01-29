@@ -40,7 +40,7 @@ if [ -z "$DB_NAME" ]; then
 fi
 
 SERVICE="${SERVICE_NAME:-odoo}"
-PROJECT_DIR="$OE_HOME/src"
+PROJECT_DIR="${REPO_DIR:-$OE_HOME/src}"
 ODOO_BIN="$OE_HOME/odoo/odoo-bin"
 VENV_PY="$OE_HOME/venv/bin/python3"
 LOG_FILE="$OE_HOME/log/git-update_${INSTANCE_NAME}.log"

@@ -38,11 +38,11 @@ describe_command() {
     case "$1" in
         deploy)
             echo "deploy: Safe deploy (backup DB/code, git reset to origin/<branch>, pip install, restart, health check, auto-rollback)."
-            echo "  Uses: /etc/odoo_deploy/<instance>.env (DB_NAME, DB_USER, DB_HOST, DB_PORT, OE_HOME, OE_USER, BRANCH, SERVICE_NAME, ODOO_PORT)"
+            echo "  Uses: /etc/odoo_deploy/<instance>.env (DB_NAME, DB_USER, DB_HOST, DB_PORT, OE_HOME, OE_USER, BRANCH, SERVICE_NAME, ODOO_PORT, REPO_DIR)"
             ;;
         git-update)
             echo "git-update: Git update with stash/restore, DB backup, requirements diff, syntax check; optional module update."
-            echo "  Uses: /etc/odoo_deploy/<instance>.env (OE_HOME, OE_USER, BRANCH, DB_NAME, SERVICE_NAME)"
+            echo "  Uses: /etc/odoo_deploy/<instance>.env (OE_HOME, OE_USER, BRANCH, DB_NAME, SERVICE_NAME, REPO_DIR)"
             echo "  Reads: /etc/systemd/system/<service>.service to detect -c config path"
             ;;
         modules)
