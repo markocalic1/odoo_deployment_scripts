@@ -38,6 +38,15 @@ Then run:
 odooctl --help
 ```
 
+### Examples (odooctl)
+```
+odooctl deploy staging19
+odooctl git-update staging19
+odooctl git-update staging19 update -all
+odooctl modules staging19 sale,stock,account
+odooctl backup-restore 19
+```
+
 ---
 
 # 📦 Included Scripts
@@ -55,6 +64,9 @@ odooctl --help
 | `odoo-git-update.sh` | Git update with backup, stash, checks, and optional module update |
 | `odoo-sync-env-create.sh` | Create prod/staging env files for backup-restore sync |
 | `odooctl.sh` | Unified CLI entrypoint for daily operations |
+| `odooctl-link.sh` | Create a global `odooctl` symlink in `/usr/local/bin` |
+| `odooctl-completion.bash` | Bash autocomplete for `odooctl` |
+| `docs.html` | Shareable HTML quick docs |
 | `README.md` | Documentation |
 
 ---
@@ -326,7 +338,7 @@ If your DB user requires a password, add one of these keys to the instance env:
 - `DB_PASSWORD`, or
 - `DB_PASS`
 
-Then `deploy_odoo.sh` will use it for `pg_dump` without prompting.
+Then `deploy_odoo.sh` and `odoo-git-update.sh` will use it for `pg_dump` without prompting.
 
 ### Custom Repo Path (REPO_DIR)
 If your git repo is not in `$OE_HOME/src`, set:
@@ -351,7 +363,7 @@ Set `FIX_REPO_PERMS=false` to disable auto-fix.
 When using Odoo HTTP backup, set one of:
 - `MASTER_PASS`, or
 - `ODOO_MASTER_PASS`
-in the instance env so deploy can call `/web/database/backup`.
+in the instance env so deploy/git-update can call `/web/database/backup`.
 
 ---
 
