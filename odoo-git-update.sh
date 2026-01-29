@@ -45,6 +45,8 @@ ODOO_BIN="$OE_HOME/odoo/odoo-bin"
 VENV_PY="$OE_HOME/venv/bin/python3"
 LOG_FILE="$OE_HOME/log/git-update_${INSTANCE_NAME}.log"
 BACKUP_DIR="$OE_HOME/backups/${INSTANCE_NAME}/$(date +%Y%m%d_%H%M%S)"
+FIX_REPO_PERMS="${FIX_REPO_PERMS:-true}"
+BACKUP_METHOD="${BACKUP_METHOD:-pg}"
 
 mkdir -p "$(dirname "$LOG_FILE")"
 mkdir -p "$BACKUP_DIR"
@@ -82,10 +84,75 @@ cd "$PROJECT_DIR"
 
 sudo -u "$OE_USER" git config --global --add safe.directory "$PROJECT_DIR" >>"$LOG_FILE" 2>&1 || true
 
-log "[INFO] DB backup..."
-sudo -u "$OE_USER" "$VENV_PY" "$ODOO_BIN" -c "$CONFIG_PATH" -d "$DB_NAME" \
-    --save --stop-after-init --backup-dir "$BACKUP_DIR" \
-    >>"$LOG_FILE" 2>&1 || log "[WARN] DB backup failed (continuing)"
+if ! sudo -u "$OE_USER" test -w "$PROJECT_DIR/.git" 2>/dev/null; then
+    if [ "$FIX_REPO_PERMS" = "true" ]; then
+        log "[WARN] Fixing repo permissions for $PROJECT_DIR (chown to $OE_USER)"
+        chown -R "$OE_USER:$OE_USER" "$PROJECT_DIR" >>"$LOG_FILE" 2>&1 || {
+            log "[ERROR] Cannot fix repo permissions"
+            exit 1
+        }
+    else
+        log "[ERROR] Repo not writable by $OE_USER (set FIX_REPO_PERMS=true to auto-fix)"
+        exit 1
+    fi
+fi
+
+log "[INFO] DB backup (method: $BACKUP_METHOD)..."
+
+PG_DUMP_ARGS=()
+[ -n "$DB_USER" ] && PG_DUMP_ARGS+=("-U" "$DB_USER")
+[ -n "$DB_HOST" ] && PG_DUMP_ARGS+=("-h" "$DB_HOST")
+[ -n "$DB_PORT" ] && PG_DUMP_ARGS+=("-p" "$DB_PORT")
+
+do_pg_dump() {
+    PGPASSWORD="$1" pg_dump "${PG_DUMP_ARGS[@]}" \
+        -F c -b -f "${BACKUP_DIR}/${DB_NAME}.dump" "$DB_NAME" \
+        >> "$LOG_FILE" 2>&1
+}
+
+do_odoo_http_backup() {
+    ODOO_PORT_EFFECTIVE="${ODOO_PORT:-8069}"
+    MASTER_PASS_EFFECTIVE="${MASTER_PASS:-${ODOO_MASTER_PASS:-}}"
+    if [ -z "$MASTER_PASS_EFFECTIVE" ]; then
+        read -s -p "Odoo master password: " MASTER_PASS_EFFECTIVE
+        echo ""
+    fi
+    curl -o "${BACKUP_DIR}/${DB_NAME}.zip" \
+        -X POST "http://127.0.0.1:${ODOO_PORT_EFFECTIVE}/web/database/backup" \
+        -F backup_format=zip \
+        -F master_pwd="$MASTER_PASS_EFFECTIVE" \
+        -F name="$DB_NAME" >>"$LOG_FILE" 2>&1
+}
+
+if [ "$BACKUP_METHOD" = "odoo" ]; then
+    if ! do_odoo_http_backup; then
+        log "[ERROR] Odoo HTTP backup failed"
+        exit 1
+    fi
+elif [ "$BACKUP_METHOD" = "auto" ]; then
+    if ! do_pg_dump "${DB_PASSWORD:-${DB_PASS:-}}"; then
+        log "[WARN] pg_dump failed — prompting for password"
+        read -s -p "Postgres password for user ${DB_USER}: " DB_PASS_PROMPT
+        echo ""
+        if ! do_pg_dump "$DB_PASS_PROMPT"; then
+            log "[WARN] pg_dump failed — trying Odoo HTTP backup"
+            if ! do_odoo_http_backup; then
+                log "[ERROR] Odoo HTTP backup failed"
+                exit 1
+            fi
+        fi
+    fi
+else
+    if ! do_pg_dump "${DB_PASSWORD:-${DB_PASS:-}}"; then
+        log "[WARN] pg_dump failed — prompting for password"
+        read -s -p "Postgres password for user ${DB_USER}: " DB_PASS_PROMPT
+        echo ""
+        if ! do_pg_dump "$DB_PASS_PROMPT"; then
+            log "[ERROR] DB backup failed"
+            exit 1
+        fi
+    fi
+fi
 
 log "[INFO] Checking local changes..."
 if ! sudo -u "$OE_USER" git diff --quiet; then

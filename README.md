@@ -309,6 +309,13 @@ REPO_DIR=/opt/odoo/src/your_repo
 ```
 This is used by deploy and git-update scripts.
 
+### Repo Permissions Auto-Fix
+By default, deploy/git-update will auto-fix repo ownership if `.git` is not writable:
+```
+FIX_REPO_PERMS=true
+```
+Set `FIX_REPO_PERMS=false` to disable auto-fix.
+
 ### Odoo HTTP Backup (BACKUP_METHOD=odoo/auto)
 When using Odoo HTTP backup, set one of:
 - `MASTER_PASS`, or
