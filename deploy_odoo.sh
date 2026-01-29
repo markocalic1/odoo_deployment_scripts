@@ -112,9 +112,9 @@ if [ -n "$DB_NAME" ] && [ "$NO_DB_BACKUP" != "true" ]; then
             -X POST "http://127.0.0.1:${ODOO_PORT_EFFECTIVE}/web/database/backup" \
             -F backup_format=zip \
             -F master_pwd="$MASTER_PASS_EFFECTIVE" \
-            -F name="$DB_NAME" >>"$DEPLOY_LOG" 2>&1)
+            -F name="$DB_NAME" 2>>"$DEPLOY_LOG")
         if ! [[ "$HTTP_CODE" =~ ^[0-9]{3}$ ]]; then
-            log "❌ Odoo HTTP backup failed (no HTTP code)"
+            log "❌ Odoo HTTP backup failed (no HTTP code) — check service/port/db_manager"
             return 1
         fi
         if [ "$HTTP_CODE" -ge 400 ]; then
@@ -205,6 +205,7 @@ REPO_PATH="${REPO_DIR:-$OE_HOME/src}"
 cd "$REPO_PATH"
 
 sudo -u "$OE_USER" git config --global --add safe.directory "$REPO_PATH" >>"$DEPLOY_LOG" 2>&1 || true
+git config --global --add safe.directory "$REPO_PATH" >>"$DEPLOY_LOG" 2>&1 || true
 
 if ! sudo -u "$OE_USER" test -w "$REPO_PATH/.git" 2>/dev/null; then
     if [ "$FIX_REPO_PERMS" = "true" ]; then
@@ -223,10 +224,16 @@ CURRENT_COMMIT=$(sudo -u "$OE_USER" git rev-parse HEAD)
 log "→ Current commit: $CURRENT_COMMIT"
 
 log "→ Fetching Git updates (origin/$BRANCH)"
-sudo  git fetch --all >>"$DEPLOY_LOG" 2>&1
+if ! sudo git fetch --all >>"$DEPLOY_LOG" 2>&1; then
+    log "❌ Git fetch failed (see log: $DEPLOY_LOG)"
+    exit 1
+fi
 
 log "→ Resetting to origin/$BRANCH"
-sudo  git reset --hard "origin/$BRANCH" >>"$DEPLOY_LOG" 2>&1
+if ! sudo git reset --hard "origin/$BRANCH" >>"$DEPLOY_LOG" 2>&1; then
+    log "❌ Git reset failed (see log: $DEPLOY_LOG)"
+    exit 1
+fi
 
 NEW_COMMIT=$(sudo -u "$OE_USER" git rev-parse HEAD)
 log "→ New commit: $NEW_COMMIT"

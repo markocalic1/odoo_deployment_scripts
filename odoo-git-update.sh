@@ -131,7 +131,7 @@ do_odoo_http_backup() {
         -X POST "http://127.0.0.1:${ODOO_PORT_EFFECTIVE}/web/database/backup" \
         -F backup_format=zip \
         -F master_pwd="$MASTER_PASS_EFFECTIVE" \
-        -F name="$DB_NAME" >>"$LOG_FILE" 2>&1)
+        -F name="$DB_NAME" 2>>"$LOG_FILE")
     if ! [[ "$HTTP_CODE" =~ ^[0-9]{3}$ ]]; then
         log "[ERROR] Odoo HTTP backup failed (no HTTP code)"
         return 1
