@@ -205,10 +205,10 @@ CURRENT_COMMIT=$(sudo -u "$OE_USER" git rev-parse HEAD)
 log "→ Current commit: $CURRENT_COMMIT"
 
 log "→ Fetching Git updates (origin/$BRANCH)"
-sudo -u "$OE_USER" git fetch --all >>"$DEPLOY_LOG" 2>&1
+sudo  git fetch --all >>"$DEPLOY_LOG" 2>&1
 
 log "→ Resetting to origin/$BRANCH"
-sudo -u "$OE_USER" git reset --hard "origin/$BRANCH" >>"$DEPLOY_LOG" 2>&1
+sudo  git reset --hard "origin/$BRANCH" >>"$DEPLOY_LOG" 2>&1
 
 NEW_COMMIT=$(sudo -u "$OE_USER" git rev-parse HEAD)
 log "→ New commit: $NEW_COMMIT"

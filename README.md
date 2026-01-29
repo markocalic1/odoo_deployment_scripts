@@ -14,6 +14,32 @@ Everything is built for professional Odoo consultants and teams who want **clean
 
 ---
 
+# ✅ Quick Start (After Cloning This Repo)
+
+```
+git clone https://github.com/markocalic/odoo_deployment_scripts.git
+cd odoo_deployment_scripts
+```
+
+Optional (recommended):
+```
+chmod +x odooctl.sh
+sudo ./odooctl-link.sh
+```
+
+If you want autocomplete:
+```
+echo 'source /path/to/odoo_deployment_scripts/odooctl-completion.bash' >> ~/.bashrc
+source ~/.bashrc
+```
+
+Then run:
+```
+odooctl --help
+```
+
+---
+
 # 📦 Included Scripts
 
 | Script | Purpose |
