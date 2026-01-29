@@ -342,6 +342,11 @@ FIX_REPO_PERMS=true
 ```
 Set `FIX_REPO_PERMS=false` to disable auto-fix.
 
+### Odoo Ports for Sync (optional)
+`odoo-sync.sh` uses:
+- `PROD_ODOO_PORT` (default 8069) for production HTTP backup
+- `STAGING_ODOO_PORT` (default 8069) for staging drop/restore
+
 ### Odoo HTTP Backup (BACKUP_METHOD=odoo/auto)
 When using Odoo HTTP backup, set one of:
 - `MASTER_PASS`, or

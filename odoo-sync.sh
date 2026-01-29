@@ -71,6 +71,7 @@ if [ -n "$PROD_ENV" ]; then
     PROD_DB_USER_ENV="$DB_USER"
     PROD_DB_HOST_ENV="$DB_HOST"
     PROD_DB_PORT_ENV="$DB_PORT"
+    PROD_ODOO_PORT_ENV="$ODOO_PORT"
     PROD_MASTER_PASS_ENV="${PROD_MASTER_PASS_ENV:-${MASTER_PASS:-${ODOO_MASTER_PASS:-}}}"
     PROD_FS_ENV="${OE_HOME}/.local/share/Odoo/filestore"
 fi
@@ -85,6 +86,7 @@ if [ -n "$STAGING_ENV" ]; then
     STAGING_DB_ENV="$DB_NAME"
     STAGING_OE_HOME_ENV="$OE_HOME"
     STAGING_SERVICE_ENV="$SERVICE_NAME"
+    STAGING_ODOO_PORT_ENV="$ODOO_PORT"
     STAGING_MASTER_PASS_ENV="${STAGING_MASTER_PASS_ENV:-${MASTER_PASS:-${ODOO_MASTER_PASS:-}}}"
     STAGING_FS_ENV="${OE_HOME}/.local/share/Odoo/filestore"
 fi
@@ -96,8 +98,10 @@ STAGING_DB="${STAGING_DB:-$STAGING_DB_ENV}"
 PROD_DB_USER="${PROD_DB_USER:-$PROD_DB_USER_ENV}"
 PROD_DB_HOST="${PROD_DB_HOST:-$PROD_DB_HOST_ENV}"
 PROD_DB_PORT="${PROD_DB_PORT:-$PROD_DB_PORT_ENV}"
+PROD_ODOO_PORT="${PROD_ODOO_PORT:-$PROD_ODOO_PORT_ENV}"
 
 STAGING_SERVICE="${STAGING_SERVICE:-$STAGING_SERVICE_ENV}"
+STAGING_ODOO_PORT="${STAGING_ODOO_PORT:-$STAGING_ODOO_PORT_ENV}"
 
 if [ -z "$BACKUP_DIR" ]; then
     if [ -n "$STAGING_OE_HOME_ENV" ]; then
@@ -209,10 +213,11 @@ perform_odoo_backup() {
         read -p "Enter Odoo master password (production): " PROD_MASTER_PASS
     fi
 
+    PROD_PORT=${PROD_ODOO_PORT:-8069}
     ssh "$PROD_SSH" "
         mkdir -p '$PROD_BACKUP_DIR';
         curl -o '$PROD_BACKUP_DIR/${PROD_DB}.zip' \
-            -X POST 'http://127.0.0.1:8069/web/database/backup' \
+            -X POST 'http://127.0.0.1:${PROD_PORT}/web/database/backup' \
             -F backup_format=zip \
             -F master_pwd='$PROD_MASTER_PASS' \
             -F name='$PROD_DB';
@@ -281,9 +286,10 @@ else
     drop_via_odoo() {
         local drop_resp drop_code
         drop_resp="$(mktemp)"
-        drop_code=$(curl -s -o "$drop_resp" -w "%{http_code}" -X POST "http://localhost:8069/web/database/drop" \
-            -F master_pwd="$STAGING_MASTER_PASS" \
-            -F name="$STAGING_DB")
+    STAGING_PORT=${STAGING_ODOO_PORT:-8069}
+    drop_code=$(curl -s -o "$drop_resp" -w "%{http_code}" -X POST "http://localhost:${STAGING_PORT}/web/database/drop" \
+        -F master_pwd="$STAGING_MASTER_PASS" \
+        -F name="$STAGING_DB")
         if [ "$drop_code" -ge 400 ]; then
             echo "⚠ Odoo drop failed (HTTP $drop_code)"
             rm -f "$drop_resp"
@@ -328,7 +334,7 @@ else
     fi
 
     restore_resp="$(mktemp)"
-    restore_code=$(curl -s -o "$restore_resp" -w "%{http_code}" -X POST "http://localhost:8069/web/database/restore" \
+    restore_code=$(curl -s -o "$restore_resp" -w "%{http_code}" -X POST "http://localhost:${STAGING_PORT}/web/database/restore" \
         -F master_pwd="$STAGING_MASTER_PASS" \
         -F name="$STAGING_DB" \
         -F backup_file=@$BACKUP_DIR/${PROD_DB}.zip \

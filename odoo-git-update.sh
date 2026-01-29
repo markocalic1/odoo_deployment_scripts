@@ -67,6 +67,15 @@ if [ ! -f "$CONFIG_PATH" ]; then
     exit 1
 fi
 
+if [ -z "$ODOO_PORT" ]; then
+    CONF_PORT=$(sed -n 's/^[[:space:]]*http_port[[:space:]]*=[[:space:]]*\\([0-9]\\+\\).*/\\1/p' "$CONFIG_PATH" | head -n1)
+    if [ -n "$CONF_PORT" ]; then
+        ODOO_PORT="$CONF_PORT"
+    else
+        ODOO_PORT="8069"
+    fi
+fi
+
 if [ ! -x "$VENV_PY" ]; then
     echo "❌ Python venv not found: $VENV_PY"
     exit 1
