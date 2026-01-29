@@ -309,6 +309,12 @@ REPO_DIR=/opt/odoo/src/your_repo
 ```
 This is used by deploy and git-update scripts.
 
+### Odoo HTTP Backup (BACKUP_METHOD=odoo/auto)
+When using Odoo HTTP backup, set one of:
+- `MASTER_PASS`, or
+- `ODOO_MASTER_PASS`
+in the instance env so deploy can call `/web/database/backup`.
+
 ---
 
 # 🟪 5. SSH Key Generator (`ssh_key_create.sh`)

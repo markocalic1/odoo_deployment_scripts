@@ -87,13 +87,17 @@ if [ -n "$DB_NAME" ] && [ "$NO_DB_BACKUP" != "true" ]; then
     }
 
     do_odoo_backup() {
-        CONFIG_PATH="$(detect_odoo_config)" || return 1
-        ODOO_BIN="$OE_HOME/odoo/odoo-bin"
-        VENV_PY="$OE_HOME/venv/bin/python3"
-        [ -x "$VENV_PY" ] || return 1
-        [ -f "$ODOO_BIN" ] || return 1
-        sudo -u "$OE_USER" "$VENV_PY" "$ODOO_BIN" -c "$CONFIG_PATH" -d "$DB_NAME" \
-            --save --stop-after-init --backup-dir "$BACKUP_DIR" >>"$DEPLOY_LOG" 2>&1
+        ODOO_PORT_EFFECTIVE="${ODOO_PORT:-8069}"
+        MASTER_PASS_EFFECTIVE="${MASTER_PASS:-${ODOO_MASTER_PASS:-}}"
+        if [ -z "$MASTER_PASS_EFFECTIVE" ]; then
+            read -s -p "Odoo master password: " MASTER_PASS_EFFECTIVE
+            echo ""
+        fi
+        curl -o "${BACKUP_DIR}/${DB_NAME}.zip" \
+            -X POST "http://127.0.0.1:${ODOO_PORT_EFFECTIVE}/web/database/backup" \
+            -F backup_format=zip \
+            -F master_pwd="$MASTER_PASS_EFFECTIVE" \
+            -F name="$DB_NAME" >>"$DEPLOY_LOG" 2>&1
     }
 
     if [ "$BACKUP_METHOD" = "odoo" ]; then
