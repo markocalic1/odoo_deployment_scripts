@@ -61,13 +61,22 @@ log "→ Creating backup directory: $BACKUP_DIR"
 # 1. Database backup (optional)
 if [ -n "$DB_NAME" ] && [ "$NO_DB_BACKUP" != "true" ]; then
     log "→ Dumping database: $DB_NAME"
-    PGPASSWORD="${DB_PASSWORD:-${DB_PASS:-}}" \
-    pg_dump -U "$DB_USER" -h "$DB_HOST" -p "$DB_PORT" \
-        -F c -b -f "${BACKUP_DIR}/${DB_NAME}.dump" "$DB_NAME" \
-        >> "$DEPLOY_LOG" 2>&1 || {
+
+    do_pg_dump() {
+        PGPASSWORD="$1" pg_dump -U "$DB_USER" -h "$DB_HOST" -p "$DB_PORT" \
+            -F c -b -f "${BACKUP_DIR}/${DB_NAME}.dump" "$DB_NAME" \
+            >> "$DEPLOY_LOG" 2>&1
+    }
+
+    if ! do_pg_dump "${DB_PASSWORD:-${DB_PASS:-}}"; then
+        log "⚠ DB backup failed — prompting for password"
+        read -s -p "Postgres password for user ${DB_USER}: " DB_PASS_PROMPT
+        echo ""
+        if ! do_pg_dump "$DB_PASS_PROMPT"; then
             log "❌ DB backup failed"
             exit 1
-        }
+        fi
+    fi
 else
     if [ "$NO_DB_BACKUP" = "true" ]; then
         log "ℹ DB backup skipped (no-db-backup)"
