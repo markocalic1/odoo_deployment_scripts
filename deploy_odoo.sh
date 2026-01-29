@@ -107,11 +107,24 @@ if [ -n "$DB_NAME" ] && [ "$NO_DB_BACKUP" != "true" ]; then
             read -s -p "Odoo master password: " MASTER_PASS_EFFECTIVE
             echo ""
         fi
-        curl -o "${BACKUP_DIR}/${DB_NAME}.zip" \
+        BACKUP_ZIP="${BACKUP_DIR}/${DB_NAME}.zip"
+        HTTP_CODE=$(curl -sS -o "$BACKUP_ZIP" -w "%{http_code}" \
             -X POST "http://127.0.0.1:${ODOO_PORT_EFFECTIVE}/web/database/backup" \
             -F backup_format=zip \
             -F master_pwd="$MASTER_PASS_EFFECTIVE" \
-            -F name="$DB_NAME" >>"$DEPLOY_LOG" 2>&1
+            -F name="$DB_NAME" >>"$DEPLOY_LOG" 2>&1)
+        if [ "$HTTP_CODE" -ge 400 ]; then
+            log "❌ Odoo HTTP backup failed (HTTP $HTTP_CODE)"
+            return 1
+        fi
+        if [ ! -s "$BACKUP_ZIP" ]; then
+            log "❌ Odoo HTTP backup produced empty file"
+            return 1
+        fi
+        if [ "$(head -c 2 "$BACKUP_ZIP")" != "PK" ]; then
+            log "❌ Odoo HTTP backup is not a ZIP file"
+            return 1
+        fi
     }
 
     if [ "$BACKUP_METHOD" = "odoo" ]; then
@@ -189,7 +202,7 @@ cd "$REPO_PATH"
 sudo -u "$OE_USER" git config --global --add safe.directory "$REPO_PATH" >>"$DEPLOY_LOG" 2>&1 || true
 
 if ! sudo -u "$OE_USER" test -w "$REPO_PATH/.git" 2>/dev/null; then
-    if [ "${FIX_REPO_PERMS:-false}" = "true" ]; then
+    if [ "$FIX_REPO_PERMS" = "true" ]; then
         log "⚠ Fixing repo permissions for $REPO_PATH (chown to $OE_USER)"
         chown -R "$OE_USER:$OE_USER" "$REPO_PATH" >>"$DEPLOY_LOG" 2>&1 || {
             log "❌ Cannot fix repo permissions (see log: $DEPLOY_LOG)"

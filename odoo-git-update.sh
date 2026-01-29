@@ -126,11 +126,24 @@ do_odoo_http_backup() {
         read -s -p "Odoo master password: " MASTER_PASS_EFFECTIVE
         echo ""
     fi
-    curl -o "${BACKUP_DIR}/${DB_NAME}.zip" \
+    BACKUP_ZIP="${BACKUP_DIR}/${DB_NAME}.zip"
+    HTTP_CODE=$(curl -sS -o "$BACKUP_ZIP" -w "%{http_code}" \
         -X POST "http://127.0.0.1:${ODOO_PORT_EFFECTIVE}/web/database/backup" \
         -F backup_format=zip \
         -F master_pwd="$MASTER_PASS_EFFECTIVE" \
-        -F name="$DB_NAME" >>"$LOG_FILE" 2>&1
+        -F name="$DB_NAME" >>"$LOG_FILE" 2>&1)
+    if [ "$HTTP_CODE" -ge 400 ]; then
+        log "[ERROR] Odoo HTTP backup failed (HTTP $HTTP_CODE)"
+        return 1
+    fi
+    if [ ! -s "$BACKUP_ZIP" ]; then
+        log "[ERROR] Odoo HTTP backup produced empty file"
+        return 1
+    fi
+    if [ "$(head -c 2 "$BACKUP_ZIP")" != "PK" ]; then
+        log "[ERROR] Odoo HTTP backup is not a ZIP file"
+        return 1
+    fi
 }
 
 if [ "$BACKUP_METHOD" = "odoo" ]; then
