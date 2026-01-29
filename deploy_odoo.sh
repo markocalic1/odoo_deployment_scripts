@@ -257,6 +257,21 @@ sleep 2
 #########################################################################
 
 step "HEALTH CHECK"
+if [ -z "$ODOO_PORT" ]; then
+    SERVICE="${SERVICE_NAME:-odoo}"
+    SERVICE_FILE="/etc/systemd/system/${SERVICE}.service"
+    if [ -f "$SERVICE_FILE" ]; then
+        CONFIG_PATH=$(grep -oP '(?<=-c ).+' "$SERVICE_FILE" | tr -d ' ')
+        if [ -f "$CONFIG_PATH" ]; then
+            CONF_PORT=$(sed -n 's/^[[:space:]]*http_port[[:space:]]*=[[:space:]]*\\([0-9]\\+\\).*/\\1/p' "$CONFIG_PATH" | head -n1)
+            if [ -n "$CONF_PORT" ]; then
+                ODOO_PORT="$CONF_PORT"
+                log "ℹ ODOO_PORT not set — using http_port from $CONFIG_PATH: $ODOO_PORT"
+            fi
+        fi
+    fi
+fi
+ODOO_PORT="${ODOO_PORT:-8069}"
 HEALTH_URL="http://127.0.0.1:${ODOO_PORT}/web/login"
 
 log "→ Performing health check on: $HEALTH_URL"
