@@ -42,6 +42,7 @@ source "$CONFIG_FILE"
 TIMESTAMP=$(date +"%Y%m%d_%H%M%S")
 BACKUP_DIR="$OE_HOME/backups/${INSTANCE_NAME}/${TIMESTAMP}"
 DEPLOY_LOG="$OE_HOME/log/deploy_${INSTANCE_NAME}.log"
+BACKUP_METHOD="${BACKUP_METHOD:-pg}"
 
 mkdir -p "$BACKUP_DIR"
 mkdir -p "$(dirname "$DEPLOY_LOG")"
@@ -73,13 +74,55 @@ if [ -n "$DB_NAME" ] && [ "$NO_DB_BACKUP" != "true" ]; then
             >> "$DEPLOY_LOG" 2>&1
     }
 
-    if ! do_pg_dump "${DB_PASSWORD:-${DB_PASS:-}}"; then
-        log "⚠ DB backup failed — prompting for password"
-        read -s -p "Postgres password for user ${DB_USER}: " DB_PASS_PROMPT
-        echo ""
-        if ! do_pg_dump "$DB_PASS_PROMPT"; then
-            log "❌ DB backup failed"
+    detect_odoo_config() {
+        SERVICE="${SERVICE_NAME:-odoo}"
+        SERVICE_FILE="/etc/systemd/system/${SERVICE}.service"
+        if [ ! -f "$SERVICE_FILE" ]; then
+            return 1
+        fi
+        CONFIG_PATH=$(grep -oP '(?<=-c ).+' "$SERVICE_FILE" | tr -d ' ')
+        [ -f "$CONFIG_PATH" ] || return 1
+        echo "$CONFIG_PATH"
+        return 0
+    }
+
+    do_odoo_backup() {
+        CONFIG_PATH="$(detect_odoo_config)" || return 1
+        ODOO_BIN="$OE_HOME/odoo/odoo-bin"
+        VENV_PY="$OE_HOME/venv/bin/python3"
+        [ -x "$VENV_PY" ] || return 1
+        [ -f "$ODOO_BIN" ] || return 1
+        sudo -u "$OE_USER" "$VENV_PY" "$ODOO_BIN" -c "$CONFIG_PATH" -d "$DB_NAME" \
+            --save --stop-after-init --backup-dir "$BACKUP_DIR" >>"$DEPLOY_LOG" 2>&1
+    }
+
+    if [ "$BACKUP_METHOD" = "odoo" ]; then
+        if ! do_odoo_backup; then
+            log "❌ Odoo backup failed"
             exit 1
+        fi
+    elif [ "$BACKUP_METHOD" = "auto" ]; then
+        if ! do_pg_dump "${DB_PASSWORD:-${DB_PASS:-}}"; then
+            log "⚠ pg_dump failed — prompting for password"
+            read -s -p "Postgres password for user ${DB_USER}: " DB_PASS_PROMPT
+            echo ""
+            if ! do_pg_dump "$DB_PASS_PROMPT"; then
+                log "⚠ pg_dump failed — trying Odoo backup"
+                if ! do_odoo_backup; then
+                    log "❌ Odoo backup failed"
+                    exit 1
+                fi
+            fi
+        fi
+    else
+        if ! do_pg_dump "${DB_PASSWORD:-${DB_PASS:-}}"; then
+            log "⚠ DB backup failed — prompting for password"
+            read -s -p "Postgres password for user ${DB_USER}: " DB_PASS_PROMPT
+            echo ""
+            if ! do_pg_dump "$DB_PASS_PROMPT"; then
+                log "❌ DB backup failed"
+                exit 1
+            fi
         fi
     fi
 else
