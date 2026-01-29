@@ -290,6 +290,11 @@ sudo bash odoo-sync-env-create.sh 19
 sudo bash odoo-sync-env-create.sh 19 --with-sync-env
 ```
 
+### Master Passwords
+You can set master passwords in:
+- `/etc/odoo_deploy/odoo-sync.env` (recommended), or
+- `prod*.env` / `staging*.env` using `MASTER_PASS` or `ODOO_MASTER_PASS`
+
 ---
 
 # 🟪 5. SSH Key Generator (`ssh_key_create.sh`)
