@@ -52,8 +52,12 @@ log() {
 }
 
 step() {
+    LAST_STEP="$*"
     log "==== $* ===="
 }
+
+LAST_STEP="INIT"
+trap 'log "❌ DEPLOY FAILED (step: ${LAST_STEP})"; log "============== END DEPLOY [$INSTANCE_NAME] (FAILED) =============="; exit 1' ERR
 
 log "============== START DEPLOY [$INSTANCE_NAME] =============="
 log "→ Config: $CONFIG_FILE"
@@ -157,13 +161,22 @@ fi
 if [ -n "$REPO_DIR" ]; then
     log "→ Backing up code (odoo + repo: $REPO_DIR)"
     tar czf "${BACKUP_DIR}/code.tar.gz" -C "$OE_HOME" odoo \
-        >> "$DEPLOY_LOG" 2>&1 || log "⚠ Code backup failed"
+        >> "$DEPLOY_LOG" 2>&1 || {
+            log "❌ Code backup failed (odoo)"
+            exit 1
+        }
     tar rf "${BACKUP_DIR}/code.tar.gz" -C "$(dirname "$REPO_DIR")" "$(basename "$REPO_DIR")" \
-        >> "$DEPLOY_LOG" 2>&1 || log "⚠ Repo backup failed"
+        >> "$DEPLOY_LOG" 2>&1 || {
+            log "❌ Repo backup failed (see log: $DEPLOY_LOG)"
+            exit 1
+        }
 else
     log "→ Backing up code (odoo + src)"
     tar czf "${BACKUP_DIR}/code.tar.gz" -C "$OE_HOME" odoo src \
-        >> "$DEPLOY_LOG" 2>&1 || log "⚠ Code backup failed"
+        >> "$DEPLOY_LOG" 2>&1 || {
+            log "❌ Code backup failed (odoo + src)"
+            exit 1
+        }
 fi
 
 
