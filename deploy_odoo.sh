@@ -160,12 +160,9 @@ fi
 # 2. Code backup
 if [ -n "$REPO_DIR" ]; then
     log "→ Backing up code (odoo + repo: $REPO_DIR)"
-    tar czf "${BACKUP_DIR}/code.tar.gz" -C "$OE_HOME" odoo \
-        >> "$DEPLOY_LOG" 2>&1 || {
-            log "❌ Code backup failed (odoo)"
-            exit 1
-        }
-    tar rf "${BACKUP_DIR}/code.tar.gz" -C "$(dirname "$REPO_DIR")" "$(basename "$REPO_DIR")" \
+    tar czf "${BACKUP_DIR}/code.tar.gz" \
+        -C "$OE_HOME" odoo \
+        -C "$(dirname "$REPO_DIR")" "$(basename "$REPO_DIR")" \
         >> "$DEPLOY_LOG" 2>&1 || {
             log "❌ Repo backup failed (see log: $DEPLOY_LOG)"
             exit 1
