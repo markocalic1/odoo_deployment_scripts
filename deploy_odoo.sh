@@ -51,17 +51,26 @@ log() {
     echo "[$(date +'%Y-%m-%d %H:%M:%S')] $*" | tee -a "$DEPLOY_LOG"
 }
 
+step() {
+    log "==== $* ===="
+}
+
 log "============== START DEPLOY [$INSTANCE_NAME] =============="
+log "→ Config: $CONFIG_FILE"
+log "→ Repo dir: ${REPO_DIR:-$OE_HOME/src}"
+log "→ Backup method: ${BACKUP_METHOD}"
+log "→ Service: ${SERVICE_NAME}"
 
 #########################################################################
 # BACKUP
 #########################################################################
 
+step "BACKUP"
 log "→ Creating backup directory: $BACKUP_DIR"
 
 # 1. Database backup (optional)
 if [ -n "$DB_NAME" ] && [ "$NO_DB_BACKUP" != "true" ]; then
-    log "→ Dumping database: $DB_NAME"
+    log "→ Dumping database: $DB_NAME (method: ${BACKUP_METHOD})"
 
     PG_DUMP_ARGS=()
     [ -n "$DB_USER" ] && PG_DUMP_ARGS+=("-U" "$DB_USER")
@@ -105,6 +114,7 @@ if [ -n "$DB_NAME" ] && [ "$NO_DB_BACKUP" != "true" ]; then
             log "❌ Odoo backup failed"
             exit 1
         fi
+        log "✓ Odoo backup completed"
     elif [ "$BACKUP_METHOD" = "auto" ]; then
         if ! do_pg_dump "${DB_PASSWORD:-${DB_PASS:-}}"; then
             log "⚠ pg_dump failed — prompting for password"
@@ -116,7 +126,10 @@ if [ -n "$DB_NAME" ] && [ "$NO_DB_BACKUP" != "true" ]; then
                     log "❌ Odoo backup failed"
                     exit 1
                 fi
+                log "✓ Odoo backup completed"
             fi
+        else
+            log "✓ pg_dump completed"
         fi
     else
         if ! do_pg_dump "${DB_PASSWORD:-${DB_PASS:-}}"; then
@@ -127,6 +140,9 @@ if [ -n "$DB_NAME" ] && [ "$NO_DB_BACKUP" != "true" ]; then
                 log "❌ DB backup failed"
                 exit 1
             fi
+            log "✓ pg_dump completed (after prompt)"
+        else
+            log "✓ pg_dump completed"
         fi
     fi
 else
@@ -155,6 +171,7 @@ fi
 # GIT UPDATE
 #########################################################################
 
+step "GIT UPDATE"
 REPO_PATH="${REPO_DIR:-$OE_HOME/src}"
 cd "$REPO_PATH"
 
@@ -163,7 +180,7 @@ sudo -u "$OE_USER" git config --global --add safe.directory "$REPO_PATH" >>"$DEP
 CURRENT_COMMIT=$(sudo -u "$OE_USER" git rev-parse HEAD)
 log "→ Current commit: $CURRENT_COMMIT"
 
-log "→ Fetching Git updates"
+log "→ Fetching Git updates (origin/$BRANCH)"
 sudo -u "$OE_USER" git fetch --all >>"$DEPLOY_LOG" 2>&1
 
 log "→ Resetting to origin/$BRANCH"
@@ -177,6 +194,7 @@ log "→ New commit: $NEW_COMMIT"
 # PIP INSTALL
 #########################################################################
 
+step "PIP INSTALL"
 REQ_FILE="${REPO_DIR:-$OE_HOME/src}/requirements.txt"
 
 if [ -f "$REQ_FILE" ]; then
@@ -198,6 +216,7 @@ fi
 # RESTART ODOO
 #########################################################################
 
+step "RESTART SERVICE"
 log "→ Restarting Odoo service: $SERVICE_NAME"
 
 systemctl restart "$SERVICE_NAME" || {
@@ -213,6 +232,7 @@ sleep 2
 # HEALTH CHECK
 #########################################################################
 
+step "HEALTH CHECK"
 HEALTH_URL="http://127.0.0.1:${ODOO_PORT}/web/login"
 
 log "→ Performing health check on: $HEALTH_URL"
