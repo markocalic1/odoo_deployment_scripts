@@ -120,13 +120,15 @@ The script will interactively ask:
 
 - Odoo user  
 - installation path  
-- git repo URL (optional)  
+- git repo URL (SSH or HTTPS, optional)  
 - branch  
 - PostgreSQL user  
 - Odoo version  
 - Systemd service name  
 - Port  
 - Whether to install wkhtmltopdf  
+
+If you provide an SSH repository URL, note that the installer runs `git` as the target Odoo system user, not as `root`. The SSH key must therefore be available for that user (for example under `/opt/odoo/.ssh` when the user is `odoo`). For public repositories, prefer an HTTPS URL such as `https://github.com/owner/repo.git`.
 
 ### 🔧 Log Rotation
 

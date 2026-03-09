@@ -21,7 +21,7 @@ OE_USER=${OE_USER:-odoo}
 read -p "Install directory [/opt/$OE_USER]: " OE_HOME
 OE_HOME=${OE_HOME:-/opt/$OE_USER}
 
-read -p "Custom modules repo SSH URL (leave empty to skip): " REPO_URL
+read -p "Custom modules repo URL (SSH or HTTPS, leave empty to skip): " REPO_URL
 
 read -p "Branch [main]: " BRANCH
 BRANCH=${BRANCH:-main}
@@ -72,6 +72,18 @@ echo "Install wkhtmltopdf:$INSTALL_WKHTMLTOPDF"
 echo "---------------------------------------------------------"
 sleep 2
 
+print_repo_access_help() {
+    local repo_url="$1"
+    local oe_user="$2"
+
+    echo "❌ Failed to access custom modules repository: $repo_url"
+    echo "   The installer runs git as system user '$oe_user'."
+    echo "   If you use an SSH URL, configure the SSH key for that user:"
+    echo "   sudo -u $oe_user -H ssh -T git@github.com"
+    echo "   For public repositories, you can use an HTTPS URL instead:"
+    echo "   https://github.com/owner/repo.git"
+}
+
 # -------------------------------
 # Install dependencies
 # -------------------------------
@@ -119,12 +131,18 @@ echo "[4/9] Processing custom addons repository..."
 if [ -n "$REPO_URL" ]; then
     if [ ! -d "$OE_HOME/src/.git" ]; then
         echo "→ Cloning custom modules..."
-        sudo -u $OE_USER git clone -b $BRANCH $REPO_URL $OE_HOME/src
+        if ! sudo -u $OE_USER -H git clone -b $BRANCH $REPO_URL $OE_HOME/src; then
+            print_repo_access_help "$REPO_URL" "$OE_USER"
+            exit 1
+        fi
     else
         echo "→ Custom repo exists, updating..."
         cd $OE_HOME/src
-        sudo -u $OE_USER git fetch origin $BRANCH
-        sudo -u $OE_USER git reset --hard origin/$BRANCH
+        if ! sudo -u $OE_USER -H git fetch origin $BRANCH; then
+            print_repo_access_help "$REPO_URL" "$OE_USER"
+            exit 1
+        fi
+        sudo -u $OE_USER -H git reset --hard origin/$BRANCH
     fi
 else
     echo "→ No repo provided, skipping custom modules."
