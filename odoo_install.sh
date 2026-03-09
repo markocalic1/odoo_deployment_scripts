@@ -77,11 +77,30 @@ print_repo_access_help() {
     local oe_user="$2"
 
     echo "❌ Failed to access custom modules repository: $repo_url"
-    echo "   The installer runs git as system user '$oe_user'."
-    echo "   If you use an SSH URL, configure the SSH key for that user:"
+    echo "   The installer first tries git as system user '$oe_user'."
+    echo "   If that fails and you run the installer as root, it falls back to root's git credentials."
+    echo "   To configure SSH for '$oe_user', test with:"
     echo "   sudo -u $oe_user -H ssh -T git@github.com"
-    echo "   For public repositories, you can use an HTTPS URL instead:"
+    echo "   For public repositories, you can also use HTTPS:"
     echo "   https://github.com/owner/repo.git"
+}
+
+run_repo_git() {
+    local oe_user="$1"
+    shift
+
+    if sudo -u "$oe_user" -H "$@"; then
+        return 0
+    fi
+
+    if [ "$EUID" -eq 0 ]; then
+        echo "→ Retrying custom repo operation with root git credentials..."
+        "$@"
+        chown -R "$oe_user:$oe_user" "$OE_HOME/src"
+        return 0
+    fi
+
+    return 1
 }
 
 # -------------------------------
@@ -131,18 +150,21 @@ echo "[4/9] Processing custom addons repository..."
 if [ -n "$REPO_URL" ]; then
     if [ ! -d "$OE_HOME/src/.git" ]; then
         echo "→ Cloning custom modules..."
-        if ! sudo -u $OE_USER -H git clone -b $BRANCH $REPO_URL $OE_HOME/src; then
+        if ! run_repo_git "$OE_USER" git clone -b "$BRANCH" "$REPO_URL" "$OE_HOME/src"; then
             print_repo_access_help "$REPO_URL" "$OE_USER"
             exit 1
         fi
     else
         echo "→ Custom repo exists, updating..."
         cd $OE_HOME/src
-        if ! sudo -u $OE_USER -H git fetch origin $BRANCH; then
+        if ! run_repo_git "$OE_USER" git fetch origin "$BRANCH"; then
             print_repo_access_help "$REPO_URL" "$OE_USER"
             exit 1
         fi
-        sudo -u $OE_USER -H git reset --hard origin/$BRANCH
+        if ! run_repo_git "$OE_USER" git reset --hard "origin/$BRANCH"; then
+            print_repo_access_help "$REPO_URL" "$OE_USER"
+            exit 1
+        fi
     fi
 else
     echo "→ No repo provided, skipping custom modules."

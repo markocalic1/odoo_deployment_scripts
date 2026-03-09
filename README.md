@@ -128,7 +128,7 @@ The script will interactively ask:
 - Port  
 - Whether to install wkhtmltopdf  
 
-If you provide an SSH repository URL, note that the installer runs `git` as the target Odoo system user, not as `root`. The SSH key must therefore be available for that user (for example under `/opt/odoo/.ssh` when the user is `odoo`). For public repositories, prefer an HTTPS URL such as `https://github.com/owner/repo.git`.
+If you provide an SSH repository URL, the installer first tries `git` as the target Odoo system user. When the installer itself is run as `root`, it now falls back to `root`'s git credentials for the custom addons repository and then restores ownership to the Odoo user. For public repositories, prefer an HTTPS URL such as `https://github.com/owner/repo.git`.
 
 ### 🔧 Log Rotation
 
