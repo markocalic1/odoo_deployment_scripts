@@ -32,7 +32,7 @@ _odooctl_complete() {
     cur="${COMP_WORDS[COMP_CWORD]}"
     prev="${COMP_WORDS[COMP_CWORD-1]}"
 
-    local commands="deploy git-update modules backup-restore backup-restore-env shell venv mini-deploy describe help"
+    local commands="deploy git-update modules remove backup-restore backup-restore-env shell venv mini-deploy describe help"
 
     # First argument: command
     if [ "$COMP_CWORD" -eq 1 ]; then
@@ -41,7 +41,7 @@ _odooctl_complete() {
     fi
 
     case "${COMP_WORDS[1]}" in
-        deploy|modules|git-update)
+        deploy|modules|git-update|remove)
             if [ "$COMP_CWORD" -eq 2 ]; then
                 COMPREPLY=( $(compgen -W "$(_odooctl_instances)" -- "$cur") )
                 return 0

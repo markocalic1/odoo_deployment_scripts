@@ -15,6 +15,7 @@ Commands:
   deploy <instance>                     Safe deploy: backup DB/code, git reset, pip install, restart, health check, rollback
   git-update <instance> [update ...]    Git update with stash/backup/checks; optional module update
   modules <instance> <m1,m2>            Update modules on a DB (no deploy)
+  remove <instance> [flags]             Remove instance service/config/env (optional DB/home/user deletion)
   backup-restore <suffix>               Production -> staging sync (DB + filestore) wrapper
   backup-restore-env <suffix>           Create prod/staging env files for backup-restore
   shell                                 Launch Odoo shell (auto-detect service/config)
@@ -27,6 +28,7 @@ Examples:
   $0 deploy staging19
   $0 git-update staging19 update -all
   $0 modules staging19 sale,stock,account
+  $0 remove staging19 --dry-run
   $0 backup-restore 19
   $0 backup-restore-env 19
   $0 describe deploy
@@ -49,6 +51,11 @@ describe_command() {
             echo "modules: Update Odoo modules using odoo-bin -u (stops/starts service)."
             echo "  Uses: /etc/odoo_deploy/<instance>.env (DB_NAME, OE_HOME, OE_USER, SERVICE_NAME)"
             echo "  Reads: /etc/systemd/system/<service>.service to detect -c config path"
+            ;;
+        remove)
+            echo "remove: Remove one instance (service, config, deploy env)."
+            echo "  Optional flags: --drop-db --delete-home --delete-user --delete-pg-user --dry-run --yes"
+            echo "  Uses: /etc/odoo_deploy/<instance>.env"
             ;;
         backup-restore)
             echo "backup-restore: Production -> staging sync (backup on prod, download, restore DB + filestore)."
@@ -132,7 +139,10 @@ case "$COMMAND" in
     modules)
         run_root "$SCRIPT_DIR/odoo-update-modules.sh" "$@"
         ;;
-        backup-restore)
+    remove)
+        run_root "$SCRIPT_DIR/odoo-remove-instance.sh" "$@"
+        ;;
+    backup-restore)
         run_root "$SCRIPT_DIR/odoo-backup-restore.sh" "$@"
         ;;
     backup-restore-env)
@@ -161,6 +171,7 @@ case "$COMMAND" in
         describe_command deploy
         describe_command git-update
         describe_command modules
+        describe_command remove
         describe_command backup-restore
         describe_command shell
         describe_command venv

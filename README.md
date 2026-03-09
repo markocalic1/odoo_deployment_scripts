@@ -44,6 +44,7 @@ odooctl deploy staging19
 odooctl git-update staging19
 odooctl git-update staging19 update -all
 odooctl modules staging19 sale,stock,account
+odooctl remove staging19 --dry-run
 odooctl backup-restore 19
 ```
 
@@ -63,6 +64,7 @@ odooctl backup-restore 19
 | `odoo-update-modules.sh` | Update modules on local DB via odoo-bin |
 | `odoo-git-update.sh` | Git update with backup, stash, checks, and optional module update |
 | `odoo-sync-env-create.sh` | Create prod/staging env files for backup-restore sync |
+| `odoo-remove-instance.sh` | Remove one Odoo instance (service/config/env, optional DB/home/users) |
 | `odooctl.sh` | Unified CLI entrypoint for daily operations |
 | `odooctl-link.sh` | Create a global `odooctl` symlink in `/usr/local/bin` |
 | `odooctl-completion.bash` | Bash autocomplete for `odooctl` |
@@ -265,7 +267,13 @@ Does: DB + code backup → git reset to origin/<branch> → pip install → rest
 ./odooctl.sh backup-restore <suffix>
 ```
 
-### 5) Need help fast
+### 5) Remove old instance safely (dry-run first)
+```
+./odooctl.sh remove <instance> --dry-run
+./odooctl.sh remove <instance> --drop-db --delete-home --yes
+```
+
+### 6) Need help fast
 ```
 ./odooctl.sh --help
 ./odooctl.sh describe deploy
