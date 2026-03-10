@@ -348,7 +348,8 @@ If your DB user requires a password, add one of these keys to the instance env:
 - `DB_PASSWORD`, or
 - `DB_PASS`
 
-Then `deploy_odoo.sh` and `odoo-git-update.sh` will use it for `pg_dump` without prompting.
+If those keys are missing, `deploy_odoo.sh` and `odoo-git-update.sh` also fall back to
+`db_password` from the Odoo config referenced by the systemd service.
 
 ### Custom Repo Path (REPO_DIR)
 If your git repo is not in `$OE_HOME/src`, set:

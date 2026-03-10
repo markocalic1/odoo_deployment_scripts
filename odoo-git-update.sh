@@ -55,17 +55,48 @@ log() {
     echo "$(date '+%Y-%m-%d %H:%M:%S') $1" | tee -a "$LOG_FILE"
 }
 
-SERVICE_FILE="/etc/systemd/system/${SERVICE}.service"
-if [ ! -f "$SERVICE_FILE" ]; then
-    echo "❌ Service file not found: $SERVICE_FILE"
-    exit 1
-fi
+detect_odoo_config() {
+    local service_file config_path
 
-CONFIG_PATH=$(grep -oP '(?<=-c ).+' "$SERVICE_FILE" | tr -d ' ')
-if [ ! -f "$CONFIG_PATH" ]; then
-    echo "❌ Could not read Odoo config path: $CONFIG_PATH"
-    exit 1
-fi
+    service_file="/etc/systemd/system/${SERVICE}.service"
+    if [ ! -f "$service_file" ]; then
+        echo "❌ Service file not found: $service_file"
+        exit 1
+    fi
+
+    config_path=$(grep -oP '(?<=-c ).+' "$service_file" | tr -d ' ')
+    if [ ! -f "$config_path" ]; then
+        echo "❌ Could not read Odoo config path: $config_path"
+        exit 1
+    fi
+
+    echo "$config_path"
+}
+
+read_odoo_conf_value() {
+    local key="$1"
+    local config_path="$2"
+    sed -n "s/^[[:space:]]*${key}[[:space:]]*=[[:space:]]*//p" "$config_path" | head -n1
+}
+
+load_db_settings_from_odoo_config() {
+    local config_path
+
+    config_path=$(detect_odoo_config)
+
+    [ -n "$DB_USER" ] || DB_USER=$(read_odoo_conf_value "db_user" "$config_path")
+    [ -n "$DB_HOST" ] || DB_HOST=$(read_odoo_conf_value "db_host" "$config_path")
+    [ -n "$DB_PORT" ] || DB_PORT=$(read_odoo_conf_value "db_port" "$config_path")
+    if [ -z "${DB_PASSWORD:-${DB_PASS:-}}" ]; then
+        DB_PASSWORD=$(read_odoo_conf_value "db_password" "$config_path")
+    fi
+
+    [ "$DB_HOST" = "False" ] && DB_HOST=""
+    [ "$DB_PORT" = "False" ] && DB_PORT=""
+    [ "$DB_PASSWORD" = "False" ] && DB_PASSWORD=""
+}
+
+CONFIG_PATH=$(detect_odoo_config)
 
 if [ -z "$ODOO_PORT" ]; then
     CONF_PORT=$(sed -n 's/^[[:space:]]*http_port[[:space:]]*=[[:space:]]*\\([0-9]\\+\\).*/\\1/p' "$CONFIG_PATH" | head -n1)
@@ -107,6 +138,8 @@ if ! sudo -u "$OE_USER" test -w "$PROJECT_DIR/.git" 2>/dev/null; then
 fi
 
 log "[INFO] DB backup (method: $BACKUP_METHOD)..."
+
+load_db_settings_from_odoo_config
 
 PG_DUMP_ARGS=()
 [ -n "$DB_USER" ] && PG_DUMP_ARGS+=("-U" "$DB_USER")

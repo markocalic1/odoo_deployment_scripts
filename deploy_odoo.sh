@@ -66,6 +66,45 @@ log "→ Repo dir: ${REPO_DIR:-$OE_HOME/src}"
 log "→ Backup method: ${BACKUP_METHOD}"
 log "→ Service: ${SERVICE_NAME}"
 
+detect_odoo_config() {
+    local service service_file config_path
+
+    service="${SERVICE_NAME:-odoo}"
+    service_file="/etc/systemd/system/${service}.service"
+    if [ ! -f "$service_file" ]; then
+        return 1
+    fi
+
+    config_path=$(grep -oP '(?<=-c ).+' "$service_file" | tr -d ' ')
+    [ -f "$config_path" ] || return 1
+
+    echo "$config_path"
+    return 0
+}
+
+read_odoo_conf_value() {
+    local key="$1"
+    local config_path="$2"
+    sed -n "s/^[[:space:]]*${key}[[:space:]]*=[[:space:]]*//p" "$config_path" | head -n1
+}
+
+load_db_settings_from_odoo_config() {
+    local config_path
+
+    config_path=$(detect_odoo_config) || return 0
+
+    [ -n "$DB_USER" ] || DB_USER=$(read_odoo_conf_value "db_user" "$config_path")
+    [ -n "$DB_HOST" ] || DB_HOST=$(read_odoo_conf_value "db_host" "$config_path")
+    [ -n "$DB_PORT" ] || DB_PORT=$(read_odoo_conf_value "db_port" "$config_path")
+    if [ -z "${DB_PASSWORD:-${DB_PASS:-}}" ]; then
+        DB_PASSWORD=$(read_odoo_conf_value "db_password" "$config_path")
+    fi
+
+    [ "$DB_HOST" = "False" ] && DB_HOST=""
+    [ "$DB_PORT" = "False" ] && DB_PORT=""
+    [ "$DB_PASSWORD" = "False" ] && DB_PASSWORD=""
+}
+
 #########################################################################
 # BACKUP
 #########################################################################
@@ -76,6 +115,7 @@ log "→ Creating backup directory: $BACKUP_DIR"
 # 1. Database backup (optional)
 if [ -n "$DB_NAME" ] && [ "$NO_DB_BACKUP" != "true" ]; then
     log "→ Dumping database: $DB_NAME (method: ${BACKUP_METHOD})"
+    load_db_settings_from_odoo_config
 
     PG_DUMP_ARGS=()
     [ -n "$DB_USER" ] && PG_DUMP_ARGS+=("-U" "$DB_USER")
@@ -86,18 +126,6 @@ if [ -n "$DB_NAME" ] && [ "$NO_DB_BACKUP" != "true" ]; then
         PGPASSWORD="$1" pg_dump "${PG_DUMP_ARGS[@]}" \
             -F c -b -f "${BACKUP_DIR}/${DB_NAME}.dump" "$DB_NAME" \
             >> "$DEPLOY_LOG" 2>&1
-    }
-
-    detect_odoo_config() {
-        SERVICE="${SERVICE_NAME:-odoo}"
-        SERVICE_FILE="/etc/systemd/system/${SERVICE}.service"
-        if [ ! -f "$SERVICE_FILE" ]; then
-            return 1
-        fi
-        CONFIG_PATH=$(grep -oP '(?<=-c ).+' "$SERVICE_FILE" | tr -d ' ')
-        [ -f "$CONFIG_PATH" ] || return 1
-        echo "$CONFIG_PATH"
-        return 0
     }
 
     do_odoo_backup() {
