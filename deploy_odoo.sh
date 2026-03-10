@@ -72,10 +72,40 @@ detect_odoo_config() {
     service="${SERVICE_NAME:-odoo}"
     service_file="/etc/systemd/system/${service}.service"
     if [ ! -f "$service_file" ]; then
-        return 1
+        service_file="/lib/systemd/system/${service}.service"
+        [ -f "$service_file" ] || service_file="/usr/lib/systemd/system/${service}.service"
+        [ -f "$service_file" ] || service_file=""
     fi
 
-    config_path=$(grep -oP '(?<=-c ).+' "$service_file" | tr -d ' ')
+    if [ -n "$service_file" ]; then
+        config_path=$(awk '
+            /^ExecStart=/ {
+                line = substr($0, index($0, "=") + 1)
+                n = split(line, args, /[[:space:]]+/)
+                for (i = 1; i <= n; i++) {
+                    if (args[i] == "-c" || args[i] == "--config") {
+                        print args[i + 1]
+                        exit
+                    }
+                    if (args[i] ~ /^--config=/) {
+                        sub(/^--config=/, "", args[i])
+                        print args[i]
+                        exit
+                    }
+                }
+            }
+        ' "$service_file" | tr -d "\"'")
+    fi
+
+    if [ ! -f "$config_path" ]; then
+        for candidate in "/etc/${service}.conf" "/etc/odoo.conf"; do
+            if [ -f "$candidate" ]; then
+                config_path="$candidate"
+                break
+            fi
+        done
+    fi
+
     [ -f "$config_path" ] || return 1
 
     echo "$config_path"
@@ -311,16 +341,12 @@ sleep 2
 
 step "HEALTH CHECK"
 if [ -z "$ODOO_PORT" ]; then
-    SERVICE="${SERVICE_NAME:-odoo}"
-    SERVICE_FILE="/etc/systemd/system/${SERVICE}.service"
-    if [ -f "$SERVICE_FILE" ]; then
-        CONFIG_PATH=$(grep -oP '(?<=-c ).+' "$SERVICE_FILE" | tr -d ' ')
-        if [ -f "$CONFIG_PATH" ]; then
-            CONF_PORT=$(sed -n 's/^[[:space:]]*http_port[[:space:]]*=[[:space:]]*\\([0-9]\\+\\).*/\\1/p' "$CONFIG_PATH" | head -n1)
-            if [ -n "$CONF_PORT" ]; then
-                ODOO_PORT="$CONF_PORT"
-                log "ℹ ODOO_PORT not set — using http_port from $CONFIG_PATH: $ODOO_PORT"
-            fi
+    CONFIG_PATH=$(detect_odoo_config || true)
+    if [ -f "$CONFIG_PATH" ]; then
+        CONF_PORT=$(sed -n 's/^[[:space:]]*http_port[[:space:]]*=[[:space:]]*\\([0-9]\\+\\).*/\\1/p' "$CONFIG_PATH" | head -n1)
+        if [ -n "$CONF_PORT" ]; then
+            ODOO_PORT="$CONF_PORT"
+            log "ℹ ODOO_PORT not set — using http_port from $CONFIG_PATH: $ODOO_PORT"
         fi
     fi
 fi

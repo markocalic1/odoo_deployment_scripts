@@ -50,11 +50,39 @@ fi
 
 SERVICE_FILE="/etc/systemd/system/${SERVICE}.service"
 if [ ! -f "$SERVICE_FILE" ]; then
-    echo "❌ Service file not found: $SERVICE_FILE"
-    exit 1
+    SERVICE_FILE="/lib/systemd/system/${SERVICE}.service"
+    [ -f "$SERVICE_FILE" ] || SERVICE_FILE="/usr/lib/systemd/system/${SERVICE}.service"
+    if [ ! -f "$SERVICE_FILE" ]; then
+        echo "❌ Service file not found: /etc/systemd/system/${SERVICE}.service"
+        exit 1
+    fi
 fi
 
-CONFIG_PATH=$(grep -oP '(?<=-c ).+' "$SERVICE_FILE" | tr -d ' ')
+CONFIG_PATH=$(awk '
+    /^ExecStart=/ {
+        line = substr($0, index($0, "=") + 1)
+        n = split(line, args, /[[:space:]]+/)
+        for (i = 1; i <= n; i++) {
+            if (args[i] == "-c" || args[i] == "--config") {
+                print args[i + 1]
+                exit
+            }
+            if (args[i] ~ /^--config=/) {
+                sub(/^--config=/, "", args[i])
+                print args[i]
+                exit
+            }
+        }
+    }
+' "$SERVICE_FILE" | tr -d "\"'")
+if [ ! -f "$CONFIG_PATH" ]; then
+    for candidate in "/etc/${SERVICE}.conf" "/etc/odoo.conf"; do
+        if [ -f "$candidate" ]; then
+            CONFIG_PATH="$candidate"
+            break
+        fi
+    done
+fi
 if [ ! -f "$CONFIG_PATH" ]; then
     echo "❌ Could not read Odoo config path: $CONFIG_PATH"
     exit 1

@@ -60,11 +60,39 @@ detect_odoo_config() {
 
     service_file="/etc/systemd/system/${SERVICE}.service"
     if [ ! -f "$service_file" ]; then
-        echo "❌ Service file not found: $service_file"
-        exit 1
+        service_file="/lib/systemd/system/${SERVICE}.service"
+        [ -f "$service_file" ] || service_file="/usr/lib/systemd/system/${SERVICE}.service"
+        if [ ! -f "$service_file" ]; then
+            echo "❌ Service file not found: /etc/systemd/system/${SERVICE}.service"
+            exit 1
+        fi
     fi
 
-    config_path=$(grep -oP '(?<=-c ).+' "$service_file" | tr -d ' ')
+    config_path=$(awk '
+        /^ExecStart=/ {
+            line = substr($0, index($0, "=") + 1)
+            n = split(line, args, /[[:space:]]+/)
+            for (i = 1; i <= n; i++) {
+                if (args[i] == "-c" || args[i] == "--config") {
+                    print args[i + 1]
+                    exit
+                }
+                if (args[i] ~ /^--config=/) {
+                    sub(/^--config=/, "", args[i])
+                    print args[i]
+                    exit
+                }
+            }
+        }
+    ' "$service_file" | tr -d "\"'")
+    if [ ! -f "$config_path" ]; then
+        for candidate in "/etc/${SERVICE}.conf" "/etc/odoo.conf"; do
+            if [ -f "$candidate" ]; then
+                config_path="$candidate"
+                break
+            fi
+        done
+    fi
     if [ ! -f "$config_path" ]; then
         echo "❌ Could not read Odoo config path: $config_path"
         exit 1

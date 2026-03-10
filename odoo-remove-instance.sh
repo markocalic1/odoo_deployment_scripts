@@ -70,7 +70,31 @@ SERVICE_NAME="${SERVICE_NAME:-odoo}"
 SERVICE_FILE="/etc/systemd/system/${SERVICE_NAME}.service"
 CONFIG_PATH=""
 if [ -f "$SERVICE_FILE" ]; then
-    CONFIG_PATH=$(grep -oP '(?<=-c ).+' "$SERVICE_FILE" | tr -d ' ' || true)
+    CONFIG_PATH=$(awk '
+        /^ExecStart=/ {
+            line = substr($0, index($0, "=") + 1)
+            n = split(line, args, /[[:space:]]+/)
+            for (i = 1; i <= n; i++) {
+                if (args[i] == "-c" || args[i] == "--config") {
+                    print args[i + 1]
+                    exit
+                }
+                if (args[i] ~ /^--config=/) {
+                    sub(/^--config=/, "", args[i])
+                    print args[i]
+                    exit
+                }
+            }
+        }
+    ' "$SERVICE_FILE" | tr -d "\"'" || true)
+fi
+if [ -z "$CONFIG_PATH" ] || [ ! -f "$CONFIG_PATH" ]; then
+    for candidate in "/etc/${SERVICE_NAME}.conf" "/etc/odoo.conf"; do
+        if [ -f "$candidate" ]; then
+            CONFIG_PATH="$candidate"
+            break
+        fi
+    done
 fi
 
 LOGROTATE_FILE="/etc/logrotate.d/${SERVICE_NAME}"

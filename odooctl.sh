@@ -104,9 +104,29 @@ show_instance_details() {
         service="${SERVICE_NAME:-odoo}"
         echo "  SERVICE:    $service"
         service_file="/etc/systemd/system/${service}.service"
+        if [ ! -f "$service_file" ]; then
+            service_file="/lib/systemd/system/${service}.service"
+            [ -f "$service_file" ] || service_file="/usr/lib/systemd/system/${service}.service"
+        fi
         echo "  SERVICE_FILE: $service_file"
         if [ -f "$service_file" ]; then
-            config_path=$(grep -oP '(?<=-c ).+' "$service_file" | tr -d ' ')
+            config_path=$(awk '
+                /^ExecStart=/ {
+                    line = substr($0, index($0, "=") + 1)
+                    n = split(line, args, /[[:space:]]+/)
+                    for (i = 1; i <= n; i++) {
+                        if (args[i] == "-c" || args[i] == "--config") {
+                            print args[i + 1]
+                            exit
+                        }
+                        if (args[i] ~ /^--config=/) {
+                            sub(/^--config=/, "", args[i])
+                            print args[i]
+                            exit
+                        }
+                    }
+                }
+            ' "$service_file" | tr -d "\"'")
             [ -n "$config_path" ] && echo "  ODOO_CONFIG: $config_path"
         fi
     else
