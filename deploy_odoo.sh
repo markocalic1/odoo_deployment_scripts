@@ -66,6 +66,21 @@ log "→ Repo dir: ${REPO_DIR:-$OE_HOME/src}"
 log "→ Backup method: ${BACKUP_METHOD}"
 log "→ Service: ${SERVICE_NAME}"
 
+run_repo_git() {
+    if sudo -u "$OE_USER" -H git "$@"; then
+        return 0
+    fi
+
+    if [ "$EUID" -eq 0 ]; then
+        log "⚠ Git access as $OE_USER failed, retrying with root git credentials"
+        git "$@"
+        chown -R "$OE_USER:$OE_USER" "$REPO_PATH" >>"$DEPLOY_LOG" 2>&1
+        return 0
+    fi
+
+    return 1
+}
+
 detect_odoo_config() {
     local service service_file config_path
 
@@ -112,6 +127,11 @@ detect_odoo_config() {
     return 0
 }
 
+ODOO_CONF_DB_USER=""
+ODOO_CONF_DB_HOST=""
+ODOO_CONF_DB_PORT=""
+ODOO_CONF_DB_PASSWORD=""
+
 read_odoo_conf_value() {
     local key="$1"
     local config_path="$2"
@@ -122,6 +142,15 @@ load_db_settings_from_odoo_config() {
     local config_path
 
     config_path=$(detect_odoo_config) || return 0
+
+    ODOO_CONF_DB_USER=$(read_odoo_conf_value "db_user" "$config_path")
+    ODOO_CONF_DB_HOST=$(read_odoo_conf_value "db_host" "$config_path")
+    ODOO_CONF_DB_PORT=$(read_odoo_conf_value "db_port" "$config_path")
+    ODOO_CONF_DB_PASSWORD=$(read_odoo_conf_value "db_password" "$config_path")
+
+    [ "$ODOO_CONF_DB_HOST" = "False" ] && ODOO_CONF_DB_HOST=""
+    [ "$ODOO_CONF_DB_PORT" = "False" ] && ODOO_CONF_DB_PORT=""
+    [ "$ODOO_CONF_DB_PASSWORD" = "False" ] && ODOO_CONF_DB_PASSWORD=""
 
     [ -n "$DB_USER" ] || DB_USER=$(read_odoo_conf_value "db_user" "$config_path")
     [ -n "$DB_HOST" ] || DB_HOST=$(read_odoo_conf_value "db_host" "$config_path")
@@ -154,6 +183,21 @@ if [ -n "$DB_NAME" ] && [ "$NO_DB_BACKUP" != "true" ]; then
 
     do_pg_dump() {
         PGPASSWORD="$1" pg_dump "${PG_DUMP_ARGS[@]}" \
+            -F c -b -f "${BACKUP_DIR}/${DB_NAME}.dump" "$DB_NAME" \
+            >> "$DEPLOY_LOG" 2>&1
+    }
+
+    do_pg_dump_as_odoo_user() {
+        local run_as args password
+
+        run_as="${OE_USER:-${DB_USER:-odoo}}"
+        password="${1:-$ODOO_CONF_DB_PASSWORD}"
+        args=()
+        [ -n "$ODOO_CONF_DB_USER" ] && args+=("-U" "$ODOO_CONF_DB_USER")
+        [ -n "$ODOO_CONF_DB_HOST" ] && args+=("-h" "$ODOO_CONF_DB_HOST")
+        [ -n "$ODOO_CONF_DB_PORT" ] && args+=("-p" "$ODOO_CONF_DB_PORT")
+
+        sudo -u "$run_as" env PGPASSWORD="$password" pg_dump "${args[@]}" \
             -F c -b -f "${BACKUP_DIR}/${DB_NAME}.dump" "$DB_NAME" \
             >> "$DEPLOY_LOG" 2>&1
     }
@@ -198,30 +242,38 @@ if [ -n "$DB_NAME" ] && [ "$NO_DB_BACKUP" != "true" ]; then
         log "✓ Odoo backup completed"
     elif [ "$BACKUP_METHOD" = "auto" ]; then
         if ! do_pg_dump "${DB_PASSWORD:-${DB_PASS:-}}"; then
-            log "⚠ pg_dump failed — prompting for password"
-            read -s -p "Postgres password for user ${DB_USER}: " DB_PASS_PROMPT
-            echo ""
-            if ! do_pg_dump "$DB_PASS_PROMPT"; then
-                log "⚠ pg_dump failed — trying Odoo backup"
-                if ! do_odoo_backup; then
-                    log "❌ Odoo backup failed"
-                    exit 1
+            if do_pg_dump_as_odoo_user; then
+                log "✓ pg_dump completed using Odoo config/local user"
+            else
+                log "⚠ pg_dump failed — prompting for password"
+                read -s -p "Postgres password for user ${DB_USER}: " DB_PASS_PROMPT
+                echo ""
+                if ! do_pg_dump "$DB_PASS_PROMPT"; then
+                    log "⚠ pg_dump failed — trying Odoo backup"
+                    if ! do_odoo_backup; then
+                        log "❌ Odoo backup failed"
+                        exit 1
+                    fi
+                    log "✓ Odoo backup completed"
                 fi
-                log "✓ Odoo backup completed"
             fi
         else
             log "✓ pg_dump completed"
         fi
     else
         if ! do_pg_dump "${DB_PASSWORD:-${DB_PASS:-}}"; then
-            log "⚠ DB backup failed — prompting for password"
-            read -s -p "Postgres password for user ${DB_USER}: " DB_PASS_PROMPT
-            echo ""
-            if ! do_pg_dump "$DB_PASS_PROMPT"; then
-                log "❌ DB backup failed"
-                exit 1
+            if do_pg_dump_as_odoo_user; then
+                log "✓ pg_dump completed using Odoo config/local user"
+            else
+                log "⚠ DB backup failed — prompting for password"
+                read -s -p "Postgres password for user ${DB_USER}: " DB_PASS_PROMPT
+                echo ""
+                if ! do_pg_dump "$DB_PASS_PROMPT"; then
+                    log "❌ DB backup failed"
+                    exit 1
+                fi
+                log "✓ pg_dump completed (after prompt)"
             fi
-            log "✓ pg_dump completed (after prompt)"
         else
             log "✓ pg_dump completed"
         fi
@@ -282,13 +334,13 @@ CURRENT_COMMIT=$(sudo -u "$OE_USER" git rev-parse HEAD)
 log "→ Current commit: $CURRENT_COMMIT"
 
 log "→ Fetching Git updates (origin/$BRANCH)"
-if ! sudo git fetch --all >>"$DEPLOY_LOG" 2>&1; then
+if ! run_repo_git fetch --all >>"$DEPLOY_LOG" 2>&1; then
     log "❌ Git fetch failed (see log: $DEPLOY_LOG)"
     exit 1
 fi
 
 log "→ Resetting to origin/$BRANCH"
-if ! sudo git reset --hard "origin/$BRANCH" >>"$DEPLOY_LOG" 2>&1; then
+if ! run_repo_git reset --hard "origin/$BRANCH" >>"$DEPLOY_LOG" 2>&1; then
     log "❌ Git reset failed (see log: $DEPLOY_LOG)"
     exit 1
 fi

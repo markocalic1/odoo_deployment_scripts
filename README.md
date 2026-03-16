@@ -365,6 +365,9 @@ FIX_REPO_PERMS=true
 ```
 Set `FIX_REPO_PERMS=false` to disable auto-fix.
 
+### Git Credentials During Deploy
+`deploy_odoo.sh` and `odoo-git-update.sh` first run git as `OE_USER`. If the script is started with `sudo` and that fails (for example, the Odoo user has no SSH deploy key), they retry with `root`'s git credentials and then restore repository ownership back to `OE_USER`.
+
 ### Odoo Ports for Sync (optional)
 `odoo-sync.sh` uses:
 - `PROD_ODOO_PORT` (default 8069) for production HTTP backup

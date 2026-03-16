@@ -55,6 +55,21 @@ log() {
     echo "$(date '+%Y-%m-%d %H:%M:%S') $1" | tee -a "$LOG_FILE"
 }
 
+run_repo_git() {
+    if sudo -u "$OE_USER" -H git "$@"; then
+        return 0
+    fi
+
+    if [ "$EUID" -eq 0 ]; then
+        log "[WARN] Git access as $OE_USER failed, retrying with root git credentials"
+        git "$@"
+        chown -R "$OE_USER:$OE_USER" "$PROJECT_DIR" >>"$LOG_FILE" 2>&1
+        return 0
+    fi
+
+    return 1
+}
+
 detect_odoo_config() {
     local service_file config_path
 
@@ -107,10 +122,24 @@ read_odoo_conf_value() {
     sed -n "s/^[[:space:]]*${key}[[:space:]]*=[[:space:]]*//p" "$config_path" | head -n1
 }
 
+ODOO_CONF_DB_USER=""
+ODOO_CONF_DB_HOST=""
+ODOO_CONF_DB_PORT=""
+ODOO_CONF_DB_PASSWORD=""
+
 load_db_settings_from_odoo_config() {
     local config_path
 
     config_path=$(detect_odoo_config)
+
+    ODOO_CONF_DB_USER=$(read_odoo_conf_value "db_user" "$config_path")
+    ODOO_CONF_DB_HOST=$(read_odoo_conf_value "db_host" "$config_path")
+    ODOO_CONF_DB_PORT=$(read_odoo_conf_value "db_port" "$config_path")
+    ODOO_CONF_DB_PASSWORD=$(read_odoo_conf_value "db_password" "$config_path")
+
+    [ "$ODOO_CONF_DB_HOST" = "False" ] && ODOO_CONF_DB_HOST=""
+    [ "$ODOO_CONF_DB_PORT" = "False" ] && ODOO_CONF_DB_PORT=""
+    [ "$ODOO_CONF_DB_PASSWORD" = "False" ] && ODOO_CONF_DB_PASSWORD=""
 
     [ -n "$DB_USER" ] || DB_USER=$(read_odoo_conf_value "db_user" "$config_path")
     [ -n "$DB_HOST" ] || DB_HOST=$(read_odoo_conf_value "db_host" "$config_path")
@@ -150,7 +179,10 @@ log "----------------------------------------"
 
 cd "$PROJECT_DIR"
 
-sudo -u "$OE_USER" git config --global --add safe.directory "$PROJECT_DIR" >>"$LOG_FILE" 2>&1 || true
+# Ensure git can operate even if the repo is owned by root and SSH keys are only available for root.
+# This mirrors the behavior of odoo_install.sh (fallback to root credentials when run as root).
+run_repo_git config --global --add safe.directory "$PROJECT_DIR" >>"$LOG_FILE" 2>&1 || true
+git config --global --add safe.directory "$PROJECT_DIR" >>"$LOG_FILE" 2>&1 || true
 
 if ! sudo -u "$OE_USER" test -w "$PROJECT_DIR/.git" 2>/dev/null; then
     if [ "$FIX_REPO_PERMS" = "true" ]; then
@@ -176,6 +208,21 @@ PG_DUMP_ARGS=()
 
 do_pg_dump() {
     PGPASSWORD="$1" pg_dump "${PG_DUMP_ARGS[@]}" \
+        -F c -b -f "${BACKUP_DIR}/${DB_NAME}.dump" "$DB_NAME" \
+        >> "$LOG_FILE" 2>&1
+}
+
+do_pg_dump_as_odoo_user() {
+    local run_as args password
+
+    run_as="${OE_USER:-${DB_USER:-odoo}}"
+    password="${1:-$ODOO_CONF_DB_PASSWORD}"
+    args=()
+    [ -n "$ODOO_CONF_DB_USER" ] && args+=("-U" "$ODOO_CONF_DB_USER")
+    [ -n "$ODOO_CONF_DB_HOST" ] && args+=("-h" "$ODOO_CONF_DB_HOST")
+    [ -n "$ODOO_CONF_DB_PORT" ] && args+=("-p" "$ODOO_CONF_DB_PORT")
+
+    sudo -u "$run_as" env PGPASSWORD="$password" pg_dump "${args[@]}" \
         -F c -b -f "${BACKUP_DIR}/${DB_NAME}.dump" "$DB_NAME" \
         >> "$LOG_FILE" 2>&1
 }
@@ -219,33 +266,41 @@ if [ "$BACKUP_METHOD" = "odoo" ]; then
     fi
 elif [ "$BACKUP_METHOD" = "auto" ]; then
     if ! do_pg_dump "${DB_PASSWORD:-${DB_PASS:-}}"; then
-        log "[WARN] pg_dump failed — prompting for password"
-        read -s -p "Postgres password for user ${DB_USER}: " DB_PASS_PROMPT
-        echo ""
-        if ! do_pg_dump "$DB_PASS_PROMPT"; then
-            log "[WARN] pg_dump failed — trying Odoo HTTP backup"
-            if ! do_odoo_http_backup; then
-                log "[ERROR] Odoo HTTP backup failed"
-                exit 1
+        if do_pg_dump_as_odoo_user; then
+            log "[INFO] pg_dump completed using Odoo config/local user"
+        else
+            log "[WARN] pg_dump failed — prompting for password"
+            read -s -p "Postgres password for user ${DB_USER}: " DB_PASS_PROMPT
+            echo ""
+            if ! do_pg_dump "$DB_PASS_PROMPT"; then
+                log "[WARN] pg_dump failed — trying Odoo HTTP backup"
+                if ! do_odoo_http_backup; then
+                    log "[ERROR] Odoo HTTP backup failed"
+                    exit 1
+                fi
             fi
         fi
     fi
 else
     if ! do_pg_dump "${DB_PASSWORD:-${DB_PASS:-}}"; then
-        log "[WARN] pg_dump failed — prompting for password"
-        read -s -p "Postgres password for user ${DB_USER}: " DB_PASS_PROMPT
-        echo ""
-        if ! do_pg_dump "$DB_PASS_PROMPT"; then
-            log "[ERROR] DB backup failed"
-            exit 1
+        if do_pg_dump_as_odoo_user; then
+            log "[INFO] pg_dump completed using Odoo config/local user"
+        else
+            log "[WARN] pg_dump failed — prompting for password"
+            read -s -p "Postgres password for user ${DB_USER}: " DB_PASS_PROMPT
+            echo ""
+            if ! do_pg_dump "$DB_PASS_PROMPT"; then
+                log "[ERROR] DB backup failed"
+                exit 1
+            fi
         fi
     fi
 fi
 
 log "[INFO] Checking local changes..."
-if ! sudo -u "$OE_USER" git diff --quiet; then
+if ! run_repo_git diff --quiet; then
     log "[WARN] Local changes found — auto-stash..."
-    sudo -u "$OE_USER" git stash push -m "auto-stash-before-update-$(date +%F-%H%M%S)" \
+    run_repo_git stash push -m "auto-stash-before-update-$(date +%F-%H%M%S)" \
         >>"$LOG_FILE" 2>&1
     STASHED=1
 else
@@ -254,40 +309,43 @@ else
 fi
 
 log "[INFO] Fetch + change check..."
-sudo -u "$OE_USER" git fetch --all >>"$LOG_FILE" 2>&1
+if ! run_repo_git fetch --all >>"$LOG_FILE" 2>&1; then
+    log "[ERROR] git fetch failed"
+    exit 1
+fi
 
-CHANGED=$(sudo -u "$OE_USER" git diff --name-only HEAD "origin/$BRANCH" | wc -l)
+CHANGED=$(run_repo_git diff --name-only HEAD "origin/$BRANCH" | wc -l)
 if [ "$CHANGED" -eq 0 ]; then
     log "[INFO] No remote changes — nothing to do."
     if [ "$STASHED" -eq 1 ]; then
         log "[INFO] Restoring stash..."
-        sudo -u "$OE_USER" git stash pop >>"$LOG_FILE" 2>&1 || log "[WARN] stash pop had conflicts."
+        run_repo_git stash pop >>"$LOG_FILE" 2>&1 || log "[WARN] stash pop had conflicts."
     fi
     exit 0
 fi
 
-OLD_COMMIT=$(sudo -u "$OE_USER" git rev-parse HEAD)
+OLD_COMMIT=$(run_repo_git rev-parse HEAD)
 
 log "[INFO] Pulling changes from origin/$BRANCH..."
-if ! sudo -u "$OE_USER" git pull origin "$BRANCH" >>"$LOG_FILE" 2>&1; then
+if ! run_repo_git pull origin "$BRANCH" >>"$LOG_FILE" 2>&1; then
     log "[ERROR] git pull failed — rollback to $OLD_COMMIT"
-    sudo -u "$OE_USER" git reset --hard "$OLD_COMMIT" >>"$LOG_FILE" 2>&1
+    run_repo_git reset --hard "$OLD_COMMIT" >>"$LOG_FILE" 2>&1
     exit 1
 fi
 
 if [ "$STASHED" -eq 1 ]; then
     log "[INFO] Restoring stash..."
-    sudo -u "$OE_USER" git stash pop >>"$LOG_FILE" 2>&1 || log "[WARN] stash pop had conflicts."
+    run_repo_git stash pop >>"$LOG_FILE" 2>&1 || log "[WARN] stash pop had conflicts."
 fi
 
 REQ_FILE="$PROJECT_DIR/requirements.txt"
 if [ -f "$REQ_FILE" ]; then
-    if sudo -u "$OE_USER" git diff --name-only "$OLD_COMMIT" HEAD | grep -q "requirements.txt"; then
+    if run_repo_git diff --name-only "$OLD_COMMIT" HEAD | grep -q "requirements.txt"; then
         log "[INFO] requirements.txt changed — pip install..."
         sudo -u "$OE_USER" "$OE_HOME/venv/bin/pip" install -r "$REQ_FILE" \
             >>"$LOG_FILE" 2>&1 || {
                 log "[ERROR] pip install failed — rollback to $OLD_COMMIT"
-                sudo -u "$OE_USER" git reset --hard "$OLD_COMMIT" >>"$LOG_FILE" 2>&1
+                run_repo_git reset --hard "$OLD_COMMIT" >>"$LOG_FILE" 2>&1
                 exit 1
             }
     else
