@@ -3,7 +3,7 @@ set -e
 
 ###############################################################################
 # SMART NGINX + SSL INSTALLER FOR ODOO
-# • Auto-detect Odoo service, config, port, longpolling port
+# • Auto-detect Odoo service, config, port, websocket/gevent port
 # • Supports IPv4, IPv6 or dual-stack
 # • Auto or manual DNS mode (with instructions)
 # • Cloudflare DNS integration
@@ -61,9 +61,12 @@ ODOO_PORT=$(sed -n 's/^[[:space:]]*http_port[[:space:]]*=[[:space:]]*\([0-9]\+\)
 ODOO_PORT=${ODOO_PORT:-8069}
 echo "✓ Odoo port: $ODOO_PORT"
 
-LONGPOLLING_PORT=$(sed -n 's/^[[:space:]]*longpolling_port[[:space:]]*=[[:space:]]*\([0-9]\+\).*/\1/p' "$ODOO_CONFIG" | head -n1)
-LONGPOLLING_PORT=${LONGPOLLING_PORT:-8072}
-echo "✓ Longpolling port: $LONGPOLLING_PORT"
+CHAT_PORT=$(sed -n 's/^[[:space:]]*gevent_port[[:space:]]*=[[:space:]]*\([0-9]\+\).*/\1/p' "$ODOO_CONFIG" | head -n1)
+if [ -z "$CHAT_PORT" ]; then
+    CHAT_PORT=$(sed -n 's/^[[:space:]]*longpolling_port[[:space:]]*=[[:space:]]*\([0-9]\+\).*/\1/p' "$ODOO_CONFIG" | head -n1)
+fi
+CHAT_PORT=${CHAT_PORT:-8072}
+echo "✓ Websocket/gevent port: $CHAT_PORT"
 
 ###############################################################################
 # STEP 4 – ASK FOR DOMAIN
@@ -198,8 +201,8 @@ upstream ${UPSTREAM_PREFIX}_backend {
     server 127.0.0.1:$ODOO_PORT;
 }
 
-upstream ${UPSTREAM_PREFIX}_longpolling {
-    server 127.0.0.1:$LONGPOLLING_PORT;
+upstream ${UPSTREAM_PREFIX}_odoochat {
+    server 127.0.0.1:$CHAT_PORT;
 }
 
 server {
@@ -232,13 +235,21 @@ server {
     proxy_connect_timeout 720s;
     proxy_send_timeout 720s;
 
+    location /websocket {
+        proxy_pass http://${UPSTREAM_PREFIX}_odoochat;
+        proxy_set_header Upgrade \$http_upgrade;
+        proxy_set_header Connection "upgrade";
+        proxy_redirect off;
+    }
+
     location / {
         proxy_pass http://${UPSTREAM_PREFIX}_backend;
         proxy_redirect off;
     }
 
     location /longpolling {
-        proxy_pass http://${UPSTREAM_PREFIX}_longpolling;
+        proxy_pass http://${UPSTREAM_PREFIX}_odoochat;
+        proxy_redirect off;
     }
 
     location ~* /web/static/ {
@@ -295,15 +306,15 @@ else
     echo "✓ Skipped opening Odoo backend port"
 fi
 
-# Allow longpolling port only if needed
-read -p "Allow direct longpolling port $LONGPOLLING_PORT (rarely needed)? [y/N]: " ALLOW_LP
+# Allow websocket/gevent port only if needed
+read -p "Allow direct websocket/gevent port $CHAT_PORT (rarely needed)? [y/N]: " ALLOW_LP
 ALLOW_LP=${ALLOW_LP:-N}
 
 if [[ "$ALLOW_LP" =~ ^[Yy]$ ]]; then
-    ufw allow $LONGPOLLING_PORT/tcp >/dev/null || true
-    echo "✓ Allowed longpolling port $LONGPOLLING_PORT"
+    ufw allow $CHAT_PORT/tcp >/dev/null || true
+    echo "✓ Allowed websocket/gevent port $CHAT_PORT"
 else
-    echo "✓ Skipped longpolling port"
+    echo "✓ Skipped websocket/gevent port"
 fi
 
 # Enable firewall without asking for confirmation
@@ -329,10 +340,9 @@ systemctl reload nginx
 echo "================== DONE =================="
 echo "Domain:        https://$DOMAIN"
 echo "Odoo port:     $ODOO_PORT"
-echo "Longpolling:   $LONGPOLLING_PORT"
+echo "Websocket:    $CHAT_PORT"
 echo "Config file:   $ODOO_CONFIG"
 echo "Service name:  $SERVICE_NAME"
 echo "SSL:           ENABLED"
 echo "proxy_mode:    VERIFIED"
 echo "=========================================="
-
