@@ -58,6 +58,12 @@ fi
 if [ -n "$DROP_METHOD" ]; then
     ARGS+=(--drop-method "$DROP_METHOD")
 fi
+if [ "$RUN_NEUTRALIZE" == "true" ]; then
+    ARGS+=(--neutralize)
+fi
+if [ "$RUN_NEUTRALIZE" == "false" ]; then
+    ARGS+=(--no-neutralize)
+fi
 if [ "$NO_FILESTORE" == "true" ]; then
     ARGS+=(--no-filestore)
 fi

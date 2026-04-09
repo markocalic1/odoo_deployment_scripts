@@ -18,6 +18,7 @@ Commands:
   remove <instance> [flags]             Remove instance service/config/env (optional DB/home/user deletion)
   backup-restore <suffix>               Production -> staging sync (DB + filestore) wrapper
   backup-restore-env <suffix>           Create prod/staging env files for backup-restore
+  neutralize <instance>                 Run Odoo CLI neutralize for one local database using /etc/odoo_deploy/<instance>.env
   shell                                 Launch Odoo shell (auto-detect service/config)
   venv                                  Activate Odoo venv (defaults to /opt/odoo)
   mini-deploy                           Minimal deploy: git pull + pip install + restart (no backup/rollback)
@@ -66,6 +67,10 @@ describe_command() {
             echo "backup-restore-env: Create prod/staging env files from existing instance envs."
             echo "  Reads: /etc/odoo_deploy/<instance>.env"
             echo "  Writes: /etc/odoo_deploy/prod<suffix>.env and /etc/odoo_deploy/staging<suffix>.env"
+            ;;
+        neutralize)
+            echo "neutralize: Run Odoo CLI neutralize on one database, then apply minimal staging extras such as web.base.url."
+            echo "  Uses: /etc/odoo_deploy/<instance>.env"
             ;;
         shell)
             echo "shell: Launch Odoo interactive shell using detected systemd service config."
@@ -168,6 +173,13 @@ case "$COMMAND" in
     backup-restore-env)
         run_root "$SCRIPT_DIR/odoo-sync-env-create.sh" "$@"
         ;;
+    neutralize)
+        if [ -z "$1" ]; then
+            echo "Usage: $0 neutralize <instance>"
+            exit 1
+        fi
+        run_root "$SCRIPT_DIR/odoo-neutralize.sh" --env "/etc/odoo_deploy/$1.env"
+        ;;
     shell)
         bash "$SCRIPT_DIR/odoo-shell.sh" "$@"
         ;;
@@ -193,6 +205,7 @@ case "$COMMAND" in
         describe_command modules
         describe_command remove
         describe_command backup-restore
+        describe_command neutralize
         describe_command shell
         describe_command venv
         describe_command mini-deploy

@@ -427,6 +427,7 @@ BACKUP_METHOD="odoo"   # or "pg"
 RESTORE_METHOD="odoo"  # or "pg"
 DROP_METHOD="auto"     # auto | odoo | pg
 NO_FILESTORE="false"
+RUN_NEUTRALIZE="true"
 
 # Master passwords (optional, avoids prompt)
 PROD_MASTER_PASS="your_production_master_password"
@@ -454,6 +455,25 @@ sudo bash odoo-sync.sh \
 - If `--method odoo` is used, Odoo service on staging must be running.
 - If DB is locked, the script will stop the service and terminate sessions before drop.
 - If restore fails, check Odoo logs: `journalctl -u odoo -n 200`.
+
+### ✅ Optional neutralization after restore
+
+If `RUN_NEUTRALIZE="true"` is set, `odoo-sync.sh` will stop staging Odoo after restore, run Odoo's built-in CLI neutralization, optionally update `web.base.url`, and then start Odoo again.
+
+Useful variables in `/etc/odoo_deploy/staging19.env`:
+```
+STAGING_BASE_URL="https://greenpork-stage.example.com"
+```
+
+You can also run it manually:
+```
+./odooctl.sh neutralize staging19
+```
+
+Equivalent low-level command:
+```
+/path/to/odoo-bin neutralize -c /path/to/odoo.conf -d your_database
+```
 
 ---
 

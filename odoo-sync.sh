@@ -19,6 +19,7 @@ PROD_MASTER_PASS=""
 STAGING_MASTER_PASS=""
 DROP_METHOD="auto" # auto | odoo | pg
 SERVICE_WAS_STOPPED="false"
+RUN_NEUTRALIZE=""
 PROD_MASTER_PASS_ENV="${PROD_MASTER_PASS:-${ODOO_PROD_MASTER_PASS:-}}"
 STAGING_MASTER_PASS_ENV="${STAGING_MASTER_PASS:-${ODOO_STAGING_MASTER_PASS:-}}"
 
@@ -51,6 +52,8 @@ while [[ "$#" -gt 0 ]]; do
         --prod-master-pass) PROD_MASTER_PASS="$2"; shift ;;
         --staging-master-pass) STAGING_MASTER_PASS="$2"; shift ;;
         --drop-method) DROP_METHOD="$2"; shift ;;
+        --neutralize) RUN_NEUTRALIZE="true" ;;
+        --no-neutralize) RUN_NEUTRALIZE="false" ;;
         --method) RESTORE_METHOD="$2"; shift ;;  # restore method
         --backup-method) BACKUP_METHOD="$2"; shift ;;  # NEW
         *) echo "Unknown argument: $1"; exit 1 ;;
@@ -89,6 +92,8 @@ if [ -n "$STAGING_ENV" ]; then
     STAGING_ODOO_PORT_ENV="$ODOO_PORT"
     STAGING_MASTER_PASS_ENV="${STAGING_MASTER_PASS_ENV:-${MASTER_PASS:-${ODOO_MASTER_PASS:-}}}"
     STAGING_FS_ENV="${OE_HOME}/.local/share/Odoo/filestore"
+    RUN_NEUTRALIZE_ENV="${RUN_NEUTRALIZE_ENV:-${NEUTRALIZE_AFTER_RESTORE:-}}"
+    STAGING_BASE_URL_ENV="${STAGING_BASE_URL_ENV:-${STAGING_BASE_URL:-${BASE_URL:-}}}"
 fi
 
 ### APPLY ENV VALUES WHEN NOT EXPLICITLY SET ###
@@ -102,6 +107,8 @@ PROD_ODOO_PORT="${PROD_ODOO_PORT:-$PROD_ODOO_PORT_ENV}"
 
 STAGING_SERVICE="${STAGING_SERVICE:-$STAGING_SERVICE_ENV}"
 STAGING_ODOO_PORT="${STAGING_ODOO_PORT:-$STAGING_ODOO_PORT_ENV}"
+RUN_NEUTRALIZE="${RUN_NEUTRALIZE:-$RUN_NEUTRALIZE_ENV}"
+STAGING_BASE_URL="${STAGING_BASE_URL:-$STAGING_BASE_URL_ENV}"
 
 if [ -z "$BACKUP_DIR" ]; then
     if [ -n "$STAGING_OE_HOME_ENV" ]; then
@@ -155,6 +162,7 @@ echo "Production DB:     $PROD_DB"
 echo "Staging DB:        $STAGING_DB"
 echo "Backup Method:     $BACKUP_METHOD"
 echo "Restore Method:    $RESTORE_METHOD"
+echo "Neutralize:        ${RUN_NEUTRALIZE:-false}"
 echo "========================================="
 
 
@@ -378,10 +386,25 @@ fi
 
 
 ###########################################################################
-# STEP 5 — RESTART ODOO
+# STEP 5 — OPTIONAL NEUTRALIZE
 ###########################################################################
 
-echo "→ Restarting Odoo..."
+if [[ "$RUN_NEUTRALIZE" == "true" ]]; then
+    echo "→ Stopping Odoo before neutralization..."
+    systemctl stop "$STAGING_SERVICE" || true
+    echo "→ Running neutralization..."
+    NEUTRALIZE_ARGS=(--env "$STAGING_ENV")
+    if [ -n "$STAGING_BASE_URL" ]; then
+        NEUTRALIZE_ARGS+=(--base-url "$STAGING_BASE_URL")
+    fi
+    bash "$(dirname "$0")/odoo-neutralize.sh" "${NEUTRALIZE_ARGS[@]}"
+fi
+
+###########################################################################
+# STEP 6 — START ODOO
+###########################################################################
+
+echo "→ Starting Odoo..."
 systemctl start "$STAGING_SERVICE"
 
 echo "========================================="
