@@ -12,7 +12,7 @@ usage() {
 Usage: $0 <command> [args...]
 
 Commands:
-  deploy <instance>                     Safe deploy: backup DB/code, git reset, pip install, restart, health check, rollback
+  deploy <instance> [--verbose]         Safe deploy: backup DB/code, git reset, pip install, restart, health check, rollback
   git-update <instance> [update ...]    Git update with stash/backup/checks; optional module update
   modules <instance> <m1,m2>            Update modules on a DB (no deploy)
   remove <instance> [flags]             Remove instance service/config/env (optional DB/home/user deletion)
@@ -26,8 +26,8 @@ Commands:
   help                                  Show this help (detailed)
 
 Examples:
-  $0 deploy staging19
-  $0 git-update staging19 update -all
+  $0 deploy staging19 --verbose
+  $0 git-update staging19 update -all --verbose
   $0 modules staging19 sale,stock,account
   $0 remove staging19 --dry-run
   $0 backup-restore 19
@@ -41,10 +41,12 @@ describe_command() {
     case "$1" in
         deploy)
             echo "deploy: Safe deploy (backup DB/code, git reset to origin/<branch>, pip install, restart, health check, auto-rollback)."
+            echo "  Optional flags: --no-db-backup --verbose"
             echo "  Uses: /etc/odoo_deploy/<instance>.env (DB_NAME, DB_USER, DB_HOST, DB_PORT, OE_HOME, OE_USER, BRANCH, SERVICE_NAME, ODOO_PORT, REPO_DIR)"
             ;;
         git-update)
             echo "git-update: Git update with stash/restore, DB backup, requirements diff, syntax check; optional module update."
+            echo "  Optional flags: --verbose"
             echo "  Uses: /etc/odoo_deploy/<instance>.env (OE_HOME, OE_USER, BRANCH, DB_NAME, SERVICE_NAME, REPO_DIR)"
             echo "  Reads: /etc/systemd/system/<service>.service to detect -c config path"
             ;;

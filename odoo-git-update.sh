@@ -5,11 +5,27 @@ set -e
 # Usage:
 #   sudo bash odoo-git-update.sh <instance_name> [update [-all|module1,module2]]
 
-INSTANCE_NAME="$1"
-ACTION="$2"
+INSTANCE_NAME=""
+VERBOSE="${VERBOSE:-false}"
+POSITIONAL_ARGS=()
+
+while [ $# -gt 0 ]; do
+    case "$1" in
+        -v|--verbose)
+            VERBOSE="true"
+            ;;
+        *)
+            POSITIONAL_ARGS+=("$1")
+            ;;
+    esac
+    shift
+done
+
+INSTANCE_NAME="${POSITIONAL_ARGS[0]:-}"
+ACTION="${POSITIONAL_ARGS[1]:-}"
 
 if [ -z "$INSTANCE_NAME" ]; then
-    echo "Usage: $0 <instance_name> [update [-all|module1,module2]]"
+    echo "Usage: $0 <instance_name> [update [-all|module1,module2]] [--verbose]"
     exit 1
 fi
 
@@ -53,6 +69,25 @@ mkdir -p "$BACKUP_DIR"
 
 log() {
     echo "$(date '+%Y-%m-%d %H:%M:%S') $1" | tee -a "$LOG_FILE"
+}
+
+verbose_log() {
+    if [ "$VERBOSE" = "true" ]; then
+        log "[INFO] $*"
+    fi
+}
+
+log_http_response_preview() {
+    local response_file="$1"
+    local header_file="$2"
+
+    if [ -s "$header_file" ]; then
+        verbose_log "Odoo HTTP response headers:"
+        sed 's/\r$//' "$header_file" >>"$LOG_FILE" 2>&1 || true
+    fi
+
+    log "[ERROR] Odoo HTTP response preview:"
+    LC_ALL=C tr -d '\000' <"$response_file" | head -c 600 >>"$LOG_FILE" 2>&1 || true
 }
 
 run_repo_git() {
@@ -176,6 +211,7 @@ fi
 log "----------------------------------------"
 log " ODOO GIT UPDATE START [$INSTANCE_NAME]"
 log "----------------------------------------"
+log "[INFO] Verbose mode: $VERBOSE"
 
 cd "$PROJECT_DIR"
 
@@ -228,6 +264,8 @@ do_pg_dump_as_odoo_user() {
 }
 
 do_odoo_http_backup() {
+    local ODOO_PORT_EFFECTIVE MASTER_PASS_EFFECTIVE BACKUP_ZIP HTTP_CODE HEADER_FILE CONTENT_TYPE
+
     ODOO_PORT_EFFECTIVE="${ODOO_PORT:-8069}"
     MASTER_PASS_EFFECTIVE="${MASTER_PASS:-${ODOO_MASTER_PASS:-}}"
     if [ -z "$MASTER_PASS_EFFECTIVE" ]; then
@@ -235,28 +273,37 @@ do_odoo_http_backup() {
         echo ""
     fi
     BACKUP_ZIP="${BACKUP_DIR}/${DB_NAME}.zip"
+    HEADER_FILE="${BACKUP_DIR}/${DB_NAME}.headers"
+    verbose_log "Requesting Odoo HTTP backup from http://127.0.0.1:${ODOO_PORT_EFFECTIVE}/web/database/backup for database ${DB_NAME}"
     HTTP_CODE=$(curl -sS -o "$BACKUP_ZIP" -w "%{http_code}" \
+        -D "$HEADER_FILE" \
         -X POST "http://127.0.0.1:${ODOO_PORT_EFFECTIVE}/web/database/backup" \
         -F backup_format=zip \
         -F master_pwd="$MASTER_PASS_EFFECTIVE" \
         -F name="$DB_NAME" 2>>"$LOG_FILE")
+    CONTENT_TYPE=$(awk 'BEGIN{IGNORECASE=1} /^Content-Type:/ {sub(/\r$/, "", $0); sub(/^Content-Type:[[:space:]]*/, "", $0); print; exit}' "$HEADER_FILE")
+    [ -n "$CONTENT_TYPE" ] && verbose_log "Odoo HTTP response content type: $CONTENT_TYPE"
     if ! [[ "$HTTP_CODE" =~ ^[0-9]{3}$ ]]; then
         log "[ERROR] Odoo HTTP backup failed (no HTTP code)"
+        [ -s "$HEADER_FILE" ] && log_http_response_preview "$BACKUP_ZIP" "$HEADER_FILE"
         return 1
     fi
     if [ "$HTTP_CODE" -ge 400 ]; then
         log "[ERROR] Odoo HTTP backup failed (HTTP $HTTP_CODE)"
+        log_http_response_preview "$BACKUP_ZIP" "$HEADER_FILE"
         return 1
     fi
     if [ ! -s "$BACKUP_ZIP" ]; then
         log "[ERROR] Odoo HTTP backup produced empty file"
+        [ -s "$HEADER_FILE" ] && log_http_response_preview "$BACKUP_ZIP" "$HEADER_FILE"
         return 1
     fi
     if [ "$(head -c 2 "$BACKUP_ZIP")" != "PK" ]; then
         log "[ERROR] Odoo HTTP backup is not a ZIP file (see log for response)"
-        head -c 200 "$BACKUP_ZIP" >>"$LOG_FILE" 2>&1 || true
+        log_http_response_preview "$BACKUP_ZIP" "$HEADER_FILE"
         return 1
     fi
+    verbose_log "Odoo HTTP backup saved to $BACKUP_ZIP"
 }
 
 if [ "$BACKUP_METHOD" = "odoo" ]; then
