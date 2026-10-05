@@ -16,6 +16,8 @@ Commands:
   git-update <instance> [update ...]    Git update with stash/backup/checks; optional module update
   modules <instance> <m1,m2>            Update modules on a DB (no deploy)
   remove <instance> [flags]             Remove instance service/config/env (optional DB/home/user deletion)
+  backup <instance|env> [directory]     Create a database + filestore ZIP, print its path
+  restore <instance|env> <zip> [--replace] Restore locally using target env settings
   backup-restore <suffix>               Production -> staging sync (DB + filestore) wrapper
   backup-restore-env <suffix>           Create prod/staging env files for backup-restore
   neutralize <instance>                 Run Odoo CLI neutralize for one local database using /etc/odoo_deploy/<instance>.env
@@ -59,6 +61,12 @@ describe_command() {
             echo "remove: Remove one instance (service, config, deploy env)."
             echo "  Optional flags: --drop-db --delete-home --delete-user --delete-pg-user --dry-run --yes"
             echo "  Uses: /etc/odoo_deploy/<instance>.env"
+            ;;
+        backup|restore)
+            echo "$1: Independent Odoo ZIP backup or local restore."
+            echo "  Uses: /etc/odoo_deploy/<instance>.env or an explicit env file path"
+            echo "  Restore requires ENVIRONMENT=local or staging; --replace explicitly replaces a database."
+            echo "  Restore supports systemd and Docker Compose; backup uses systemd."
             ;;
         backup-restore)
             echo "backup-restore: Production -> staging sync (backup on prod, download, restore DB + filestore)."
@@ -169,6 +177,9 @@ case "$COMMAND" in
     remove)
         run_root "$SCRIPT_DIR/odoo-remove-instance.sh" "$@"
         ;;
+    backup|restore)
+        run_root "$SCRIPT_DIR/odoo-db-archive.sh" "$COMMAND" "$@"
+        ;;
     backup-restore)
         run_root "$SCRIPT_DIR/odoo-backup-restore.sh" "$@"
         ;;
@@ -206,6 +217,8 @@ case "$COMMAND" in
         describe_command git-update
         describe_command modules
         describe_command remove
+        describe_command backup
+        describe_command restore
         describe_command backup-restore
         describe_command neutralize
         describe_command shell

@@ -589,3 +589,81 @@ Everything follows modern DevOps & Odoo best practices.
 
 MIT License  
 Feel free to use, modify, and improve!
+
+
+## Independent ZIP backup and local restore
+
+These commands are separate from `backup-restore`. Backup creates an Odoo 19
+ZIP containing the database and filestore, validates it, and prints its path.
+It does not transfer files or restore any database. Run it on the server:
+
+```bash
+sudo bash ./odooctl.sh backup prod19
+```
+
+The env is `/etc/odoo_deploy/prod19.env`; see `backup-prod.env.example`.
+You can also pass an explicit env file path and an output directory:
+
+```bash
+sudo bash ./odooctl.sh backup /etc/odoo_deploy/prod19.env /opt/odoo/backups/prod19
+```
+
+Backup briefly stops the active Odoo systemd service to keep database and
+filestore consistent. The service is restarted if dumping fails. The ZIP and
+its adjacent `.sha256` file are private and belong to `OE_USER`; download them
+using root or that SSH user. Stop any separate writers during the backup.
+The archive contains data, not Odoo code or server configuration. Restore with
+compatible Odoo community, enterprise and custom-addon versions.
+
+On your own computer, copy the exact paths printed by the backup command:
+
+```bash
+mkdir -p "$HOME/Backups/odoo"
+chmod 700 "$HOME/Backups/odoo"
+scp root@SERVER:/printed/path/backup.zip "$HOME/Backups/odoo/"
+scp root@SERVER:/printed/path/backup.zip.sha256 "$HOME/Backups/odoo/"
+```
+
+Restore uses the target env, not the production env. See
+`restore-local.env.example` for Docker Compose. For a systemd target provide
+`ENVIRONMENT=local`, `RUNTIME=systemd`, `DB_NAME`, `OE_HOME`, `OE_USER`,
+`SERVICE_NAME`, `CONFIG_PATH` and `DATA_DIR`. Env files are trusted Bash
+configuration, use absolute paths and mode 0600.
+
+```bash
+sudo bash ./odooctl.sh restore /path/to/local.env /path/to/backup.zip
+```
+
+To replace an existing target database explicitly:
+
+```bash
+sudo bash ./odooctl.sh restore /path/to/local.env /path/to/backup.zip --replace
+```
+
+Restore validates the ZIP and, when present beside it, its checksum before
+stopping the target. It requires `ENVIRONMENT=local` or `staging`, uses Odoo's
+`load --neutralize`, and does not upgrade modules. Neutralization is not a
+substitute for isolating custom integrations. On successful restore it starts
+the target service. On restore failure it leaves it stopped for inspection;
+it does not roll back an overwritten database. Save a backup of the current
+local database before `--replace` if you need its contents.
+
+All script deployment remains through Git. These commands do not copy code
+or scripts to servers.
+
+
+### Use the repository Docker env directly
+
+For deployment Docker repositories containing `docker/env` (or `.env`),
+Compose next to it and `etc/odoo.conf`, no separate restore env is required:
+
+```bash
+sudo bash ./odooctl.sh restore /path/to/project/docker/env /path/to/backup.zip --replace
+```
+
+Compose resolves its own env syntax. The command selects the single Odoo
+service with a mounted `/venv`, reads the target database and data directory
+from the repository Odoo config, and verifies that data_dir is mounted.
+Ambiguous service/config layouts require an explicit restore env instead.
+The selected Docker repository is the local restore target. Passwords are
+not printed. Backup on a systemd server remains a separate command.
