@@ -1,6 +1,12 @@
 #!/bin/bash
 set -e
 
+SCRIPT_DIR="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)"
+# shellcheck source=odoo-git-common.sh
+source "$SCRIPT_DIR/odoo-git-common.sh"
+
+run_repo_git() { git "$@"; }
+
 # --- Settings ---
 ODOO_SERVICE="odoo"                 # systemd service name
 ODOO_HOME="/opt/odoo"               # Odoo installation directory
@@ -26,7 +32,9 @@ cd "$REPO"
 # 1. Pull latest code
 # -----------------------------------------------
 echo "→ Pulling latest changes..."
+check_repo_submodules_clean
 git pull
+sync_repo_submodules
 
 # -----------------------------------------------
 # 2. Install Python requirements (if exist)

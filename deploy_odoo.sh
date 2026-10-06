@@ -1,6 +1,10 @@
 #!/bin/bash
 set -e
 
+SCRIPT_DIR="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)"
+# shellcheck source=odoo-git-common.sh
+source "$SCRIPT_DIR/odoo-git-common.sh"
+
 #########################################################################
 # UNIVERSAL ODOO DEPLOY SCRIPT
 # - Backup database (optional)
@@ -110,9 +114,10 @@ run_repo_git() {
 
     if [ "$EUID" -eq 0 ]; then
         log "⚠ Git access as $OE_USER failed, retrying with root git credentials"
-        git "$@"
-        chown -R "$OE_USER:$OE_USER" "$REPO_PATH" >>"$DEPLOY_LOG" 2>&1
-        return 0
+        local git_status=0
+        git "$@" || git_status=$?
+        chown -R "$OE_USER:$OE_USER" "$REPO_PATH" >>"$DEPLOY_LOG" 2>&1 || return $?
+        return "$git_status"
     fi
 
     return 1
@@ -199,6 +204,7 @@ load_db_settings_from_odoo_config() {
     [ "$DB_HOST" = "False" ] && DB_HOST=""
     [ "$DB_PORT" = "False" ] && DB_PORT=""
     [ "$DB_PASSWORD" = "False" ] && DB_PASSWORD=""
+    return 0
 }
 
 #########################################################################
@@ -378,6 +384,11 @@ if ! sudo -u "$OE_USER" test -w "$REPO_PATH/.git" 2>/dev/null; then
     fi
 fi
 
+check_repo_submodules_clean >>"$DEPLOY_LOG" 2>&1 || {
+    log "Submodul ima lokalne izmjene; deploy je zaustavljen."
+    exit 1
+}
+
 CURRENT_COMMIT=$(sudo -u "$OE_USER" git rev-parse HEAD)
 log "→ Current commit: $CURRENT_COMMIT"
 
@@ -390,6 +401,13 @@ fi
 log "→ Resetting to origin/$BRANCH"
 if ! run_repo_git reset --hard "origin/$BRANCH" >>"$DEPLOY_LOG" 2>&1; then
     log "❌ Git reset failed (see log: $DEPLOY_LOG)"
+    exit 1
+fi
+
+log "→ Poravnavanje submodula na commitove glavnog repozitorija"
+if ! sync_repo_submodules >>"$DEPLOY_LOG" 2>&1; then
+    log "Preuzimanje submodula nije uspjelo; vracam prethodni commit."
+    restore_repo_commit "$CURRENT_COMMIT" >>"$DEPLOY_LOG" 2>&1
     exit 1
 fi
 
@@ -409,7 +427,7 @@ if [ -f "$REQ_FILE" ]; then
     "$OE_HOME/venv/bin/pip" install -r "$REQ_FILE" \
         >> "$DEPLOY_LOG" 2>&1 || {
             log "❌ Pip install failed → rolling back"
-            sudo -u "$OE_USER" git reset --hard "$CURRENT_COMMIT"
+            restore_repo_commit "$CURRENT_COMMIT"
             "$OE_HOME/venv/bin/pip" install -r "$REQ_FILE" >>"$DEPLOY_LOG" 2>&1 || true
             log "❌ DEPLOY FAILED"
             exit 1
@@ -428,7 +446,7 @@ log "→ Restarting Odoo service: $SERVICE_NAME"
 
 systemctl restart "$SERVICE_NAME" || {
     log "❌ Service failed to restart → rolling back"
-    sudo -u "$OE_USER" git reset --hard "$CURRENT_COMMIT"
+    restore_repo_commit "$CURRENT_COMMIT"
     systemctl restart "$SERVICE_NAME" || true
     exit 1
 }
@@ -443,7 +461,7 @@ step "HEALTH CHECK"
 if [ -z "$ODOO_PORT" ]; then
     CONFIG_PATH=$(detect_odoo_config || true)
     if [ -f "$CONFIG_PATH" ]; then
-        CONF_PORT=$(sed -n 's/^[[:space:]]*http_port[[:space:]]*=[[:space:]]*\\([0-9]\\+\\).*/\\1/p' "$CONFIG_PATH" | head -n1)
+        CONF_PORT=$(sed -n 's/^[[:space:]]*http_port[[:space:]]*=[[:space:]]*\([0-9]\+\).*/\1/p' "$CONFIG_PATH" | head -n1)
         if [ -n "$CONF_PORT" ]; then
             ODOO_PORT="$CONF_PORT"
             log "ℹ ODOO_PORT not set — using http_port from $CONFIG_PATH: $ODOO_PORT"
@@ -457,9 +475,15 @@ log "→ Performing health check on: $HEALTH_URL"
 
 SUCCESS=0
 for i in {1..10}; do
-    if curl -s "$HEALTH_URL" | grep -qi "odoo"; then
-        SUCCESS=1
-        break
+    HEALTH_ARGS=(--silent --show-error --output /dev/null --write-out '%{http_code}'
+        --connect-timeout 5 --max-time 15 --get)
+    if [ -n "${DB_NAME:-}" ]; then
+        HEALTH_ARGS+=(--data-urlencode "db=$DB_NAME")
+    fi
+    if HTTP_STATUS=$(curl "${HEALTH_ARGS[@]}" "$HEALTH_URL"); then
+        case "$HTTP_STATUS" in
+            200|302|303) SUCCESS=1; break ;;
+        esac
     fi
     log "  - Attempt $i failed, retrying..."
     sleep 3
@@ -467,8 +491,8 @@ done
 
 if [ "$SUCCESS" -ne 1 ]; then
     log "❌ HEALTH CHECK FAILED → Rolling back"
-    cd "$OE_HOME/src"
-    sudo -u "$OE_USER" git reset --hard "$CURRENT_COMMIT" >>"$DEPLOY_LOG" 2>&1
+    cd "$REPO_PATH"
+    restore_repo_commit "$CURRENT_COMMIT" >>"$DEPLOY_LOG" 2>&1
     systemctl restart "$SERVICE_NAME"
     exit 1
 fi

@@ -358,6 +358,15 @@ REPO_DIR=/opt/odoo/src/your_repo
 ```
 This is used by deploy and git-update scripts.
 
+### Git submoduli
+
+`deploy`, `git-update` i `mini-deploy` poravnavaju submodule na commitove
+glavnog repozitorija prije restarta. Uz skripte prenijeti `odoo-git-common.sh`.
+`deploy` i `git-update` poravnavaju submodule i pri povratku prethodnog commita.
+Lokalne izmjene unutar submodula zaustavljaju postupak. `addons_path`, prva
+instalacija modula i Python ovisnosti konfiguriraju se za konkretnu instancu.
+Git povratak ne vraća stanje baze ni konfiguraciju.
+
 ### Repo Permissions Auto-Fix
 By default, deploy/git-update will auto-fix repo ownership if `.git` is not writable:
 ```

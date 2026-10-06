@@ -1,6 +1,10 @@
 #!/bin/bash
 set -e
 
+SCRIPT_DIR="$(cd "$(dirname "$(readlink -f "${BASH_SOURCE[0]}")")" && pwd)"
+# shellcheck source=odoo-git-common.sh
+source "$SCRIPT_DIR/odoo-git-common.sh"
+
 # Git update + optional module update for Odoo instance
 # Usage:
 #   sudo bash odoo-git-update.sh <instance_name> [update [-all|module1,module2]]
@@ -97,9 +101,10 @@ run_repo_git() {
 
     if [ "$EUID" -eq 0 ]; then
         log "[WARN] Git access as $OE_USER failed, retrying with root git credentials"
-        git "$@"
-        chown -R "$OE_USER:$OE_USER" "$PROJECT_DIR" >>"$LOG_FILE" 2>&1
-        return 0
+        local git_status=0
+        git "$@" || git_status=$?
+        chown -R "$OE_USER:$OE_USER" "$PROJECT_DIR" >>"$LOG_FILE" 2>&1 || return $?
+        return "$git_status"
     fi
 
     return 1
@@ -186,12 +191,13 @@ load_db_settings_from_odoo_config() {
     [ "$DB_HOST" = "False" ] && DB_HOST=""
     [ "$DB_PORT" = "False" ] && DB_PORT=""
     [ "$DB_PASSWORD" = "False" ] && DB_PASSWORD=""
+    return 0
 }
 
 CONFIG_PATH=$(detect_odoo_config)
 
 if [ -z "$ODOO_PORT" ]; then
-    CONF_PORT=$(sed -n 's/^[[:space:]]*http_port[[:space:]]*=[[:space:]]*\\([0-9]\\+\\).*/\\1/p' "$CONFIG_PATH" | head -n1)
+    CONF_PORT=$(sed -n 's/^[[:space:]]*http_port[[:space:]]*=[[:space:]]*\([0-9]\+\).*/\1/p' "$CONFIG_PATH" | head -n1)
     if [ -n "$CONF_PORT" ]; then
         ODOO_PORT="$CONF_PORT"
     else
@@ -344,14 +350,19 @@ else
     fi
 fi
 
+check_repo_submodules_clean >>"$LOG_FILE" 2>&1 || {
+    log "[ERROR] Submodul ima lokalne izmjene; update je zaustavljen."
+    exit 1
+}
+SUBMODULES_BEFORE=$(run_repo_git submodule status --recursive)
+
 log "[INFO] Checking local changes..."
-if ! run_repo_git diff --quiet; then
-    log "[WARN] Local changes found — auto-stash..."
+if ! run_repo_git diff --ignore-submodules=all --quiet || ! run_repo_git diff --cached --ignore-submodules=all --quiet; then
+    log "[WARN] Local changes found; auto-stash..."
     run_repo_git stash push -m "auto-stash-before-update-$(date +%F-%H%M%S)" \
         >>"$LOG_FILE" 2>&1
     STASHED=1
 else
-    log "[INFO] No local changes."
     STASHED=0
 fi
 
@@ -362,37 +373,45 @@ if ! run_repo_git fetch --all >>"$LOG_FILE" 2>&1; then
 fi
 
 CHANGED=$(run_repo_git diff --name-only HEAD "origin/$BRANCH" | wc -l)
-if [ "$CHANGED" -eq 0 ]; then
-    log "[INFO] No remote changes — nothing to do."
-    if [ "$STASHED" -eq 1 ]; then
-        log "[INFO] Restoring stash..."
-        run_repo_git stash pop >>"$LOG_FILE" 2>&1 || log "[WARN] stash pop had conflicts."
+OLD_COMMIT=$(run_repo_git rev-parse HEAD)
+if [ "$CHANGED" -ne 0 ]; then
+    log "[INFO] Pulling changes from origin/$BRANCH..."
+    if ! run_repo_git pull origin "$BRANCH" >>"$LOG_FILE" 2>&1; then
+        log "[ERROR] git pull failed; rollback to $OLD_COMMIT"
+        restore_repo_commit "$OLD_COMMIT" >>"$LOG_FILE" 2>&1
+        exit 1
     fi
-    exit 0
 fi
 
-OLD_COMMIT=$(run_repo_git rev-parse HEAD)
-
-log "[INFO] Pulling changes from origin/$BRANCH..."
-if ! run_repo_git pull origin "$BRANCH" >>"$LOG_FILE" 2>&1; then
-    log "[ERROR] git pull failed — rollback to $OLD_COMMIT"
-    run_repo_git reset --hard "$OLD_COMMIT" >>"$LOG_FILE" 2>&1
+# Also initialize missing submodules when the parent commit has not changed.
+if ! sync_repo_submodules >>"$LOG_FILE" 2>&1; then
+    log "[ERROR] Submodule update failed; rollback to $OLD_COMMIT"
+    restore_repo_commit "$OLD_COMMIT" >>"$LOG_FILE" 2>&1
     exit 1
 fi
+SUBMODULES_AFTER=$(run_repo_git submodule status --recursive)
 
 if [ "$STASHED" -eq 1 ]; then
     log "[INFO] Restoring stash..."
-    run_repo_git stash pop >>"$LOG_FILE" 2>&1 || log "[WARN] stash pop had conflicts."
+    run_repo_git stash pop >>"$LOG_FILE" 2>&1 || {
+        log "[ERROR] stash pop has conflicts; inspect the repository before restarting."
+        exit 1
+    }
+fi
+
+if [ "$CHANGED" -eq 0 ] && [ "$SUBMODULES_BEFORE" = "$SUBMODULES_AFTER" ] && [ "$ACTION" != "update" ]; then
+    log "[INFO] No remote or submodule changes."
+    exit 0
 fi
 
 REQ_FILE="$PROJECT_DIR/requirements.txt"
 if [ -f "$REQ_FILE" ]; then
-    if run_repo_git diff --name-only "$OLD_COMMIT" HEAD | grep -q "requirements.txt"; then
-        log "[INFO] requirements.txt changed — pip install..."
+    if [ "$SUBMODULES_BEFORE" != "$SUBMODULES_AFTER" ] || run_repo_git diff --name-only "$OLD_COMMIT" HEAD | grep -q "requirements.txt"; then
+        log "[INFO] Requirements or submodules changed; pip install..."
         sudo -u "$OE_USER" "$OE_HOME/venv/bin/pip" install -r "$REQ_FILE" \
             >>"$LOG_FILE" 2>&1 || {
                 log "[ERROR] pip install failed — rollback to $OLD_COMMIT"
-                run_repo_git reset --hard "$OLD_COMMIT" >>"$LOG_FILE" 2>&1
+                restore_repo_commit "$OLD_COMMIT" >>"$LOG_FILE" 2>&1
                 exit 1
             }
     else
@@ -407,13 +426,13 @@ if ! sudo -u "$OE_USER" bash -c \
     "find '$PROJECT_DIR' -name '*.py' -print0 | xargs -0 '$VENV_PY' -m py_compile" \
     >>"$LOG_FILE" 2>&1; then
     log "[ERROR] Python syntax check failed — rollback to $OLD_COMMIT"
-    sudo -u "$OE_USER" git reset --hard "$OLD_COMMIT" >>"$LOG_FILE" 2>&1
+    restore_repo_commit "$OLD_COMMIT" >>"$LOG_FILE" 2>&1
     exit 1
 fi
 
 if [ "$ACTION" = "update" ]; then
-    shift 2
-    if [ "$1" = "-all" ]; then
+    set -- "${POSITIONAL_ARGS[@]:2}"
+    if [ "${1:-}" = "-all" ]; then
         log "[INFO] Updating all modules..."
         systemctl stop "$SERVICE" || true
         sudo -u "$OE_USER" "$VENV_PY" "$ODOO_BIN" -c "$CONFIG_PATH" -d "$DB_NAME" \
