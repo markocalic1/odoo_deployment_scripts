@@ -14,6 +14,7 @@ Usage: $0 <command> [args...]
 Commands:
   deploy <instance> [--verbose]         Safe deploy: backup DB/code, git reset, pip install, restart, health check, rollback
   git-update <instance> [update ...]    Git update with stash/backup/checks; optional module update
+  install <instance> <m1,m2>            Install modules on a DB (no deploy)
   modules <instance> <m1,m2>            Update modules on a DB (no deploy)
   remove <instance> [flags]             Remove instance service/config/env (optional DB/home/user deletion)
   backup <instance|env> [directory]     Create a database + filestore ZIP, print its path
@@ -30,6 +31,7 @@ Commands:
 Examples:
   $0 deploy staging19 --verbose
   $0 git-update staging19 update -all --verbose
+  $0 install staging19 sale,stock,account
   $0 modules staging19 sale,stock,account
   $0 remove staging19 --dry-run
   $0 backup-restore 19
@@ -50,6 +52,11 @@ describe_command() {
             echo "git-update: Git update with stash/restore, DB backup, requirements diff, syntax check; optional module update."
             echo "  Optional flags: --verbose"
             echo "  Uses: /etc/odoo_deploy/<instance>.env (OE_HOME, OE_USER, BRANCH, DB_NAME, SERVICE_NAME, REPO_DIR)"
+            echo "  Reads: /etc/systemd/system/<service>.service to detect -c config path"
+            ;;
+        install)
+            echo "install: Install Odoo modules using odoo-bin -i (stops/starts service)."
+            echo "  Uses: /etc/odoo_deploy/<instance>.env (DB_NAME, OE_HOME, OE_USER, SERVICE_NAME)"
             echo "  Reads: /etc/systemd/system/<service>.service to detect -c config path"
             ;;
         modules)
@@ -171,6 +178,9 @@ case "$COMMAND" in
     git-update)
         run_root "$SCRIPT_DIR/odoo-git-update.sh" "$@"
         ;;
+    install)
+        run_root "$SCRIPT_DIR/odoo-install-modules.sh" "$@"
+        ;;
     modules)
         run_root "$SCRIPT_DIR/odoo-update-modules.sh" "$@"
         ;;
@@ -215,6 +225,7 @@ case "$COMMAND" in
         echo "Details:"
         describe_command deploy
         describe_command git-update
+        describe_command install
         describe_command modules
         describe_command remove
         describe_command backup
