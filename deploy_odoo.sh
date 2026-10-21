@@ -235,8 +235,8 @@ if [ -n "$DB_NAME" ] && [ "$NO_DB_BACKUP" != "true" ]; then
         [ -n "$ODOO_CONF_DB_PORT" ] && args+=("-p" "$ODOO_CONF_DB_PORT")
 
         sudo -u "$run_as" env PGPASSWORD="$password" pg_dump "${args[@]}" \
-            -F c -b -f "${BACKUP_DIR}/${DB_NAME}.dump" "$DB_NAME" \
-            >> "$DEPLOY_LOG" 2>&1
+            -F c -b "$DB_NAME" \
+            > "${BACKUP_DIR}/${DB_NAME}.dump" 2>> "$DEPLOY_LOG"
     }
 
     do_odoo_backup() {
