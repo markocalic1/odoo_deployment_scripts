@@ -265,8 +265,8 @@ do_pg_dump_as_odoo_user() {
     [ -n "$ODOO_CONF_DB_PORT" ] && args+=("-p" "$ODOO_CONF_DB_PORT")
 
     sudo -u "$run_as" env PGPASSWORD="$password" pg_dump "${args[@]}" \
-        -F c -b -f "${BACKUP_DIR}/${DB_NAME}.dump" "$DB_NAME" \
-        >> "$LOG_FILE" 2>&1
+        -F c -b "$DB_NAME" \
+        > "${BACKUP_DIR}/${DB_NAME}.dump" 2>> "$LOG_FILE"
 }
 
 do_odoo_http_backup() {
