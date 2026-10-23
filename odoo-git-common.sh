@@ -1,6 +1,17 @@
 #!/bin/bash
 # Caller provides run_repo_git and sets the repository as the working directory.
 
+prepare_repo_permissions() {
+    local repo="$1"
+    # A writable .git does not imply writable nested addon/migration directories.
+    # Do not follow symlinks into locations outside the checkout.
+    if [ "$EUID" -eq 0 ] && [ "${FIX_REPO_PERMS:-true}" = "true" ]; then
+        chown -h -R "$OE_USER:$OE_USER" "$repo" || return $?
+    fi
+    sudo -u "$OE_USER" test -w "$repo" &&
+        sudo -u "$OE_USER" test -w "$repo/.git"
+}
+
 check_repo_submodules_clean() {
     run_repo_git submodule foreach --recursive '
         if test -n "$(git status --porcelain)"; then

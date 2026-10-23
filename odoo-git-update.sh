@@ -95,19 +95,20 @@ log_http_response_preview() {
 }
 
 run_repo_git() {
-    if sudo -u "$OE_USER" -H git "$@"; then
+    local git_status=0
+    sudo -u "$OE_USER" -H git "$@" || git_status=$?
+    if [ "$git_status" -eq 0 ]; then
         return 0
     fi
 
-    if [ "$EUID" -eq 0 ]; then
-        log "[WARN] Git access as $OE_USER failed, retrying with root git credentials"
-        local git_status=0
+    # Only fetch may use root credentials. Never repeat a worktree mutation.
+    if [ "${1:-}" = "fetch" ] && [ "$EUID" -eq 0 ] && [ "$FIX_REPO_PERMS" = "true" ]; then
+        log "[WARN] Git fetch as $OE_USER failed, retrying with root credentials"
+        git_status=0
         git "$@" || git_status=$?
-        chown -R "$OE_USER:$OE_USER" "$PROJECT_DIR" >>"$LOG_FILE" 2>&1 || return $?
-        return "$git_status"
+        chown -h -R "$OE_USER:$OE_USER" "$PROJECT_DIR" >>"$LOG_FILE" 2>&1 || return $?
     fi
-
-    return 1
+    return "$git_status"
 }
 
 detect_odoo_config() {
@@ -226,18 +227,10 @@ cd "$PROJECT_DIR"
 run_repo_git config --global --add safe.directory "$PROJECT_DIR" >>"$LOG_FILE" 2>&1 || true
 git config --global --add safe.directory "$PROJECT_DIR" >>"$LOG_FILE" 2>&1 || true
 
-if ! sudo -u "$OE_USER" test -w "$PROJECT_DIR/.git" 2>/dev/null; then
-    if [ "$FIX_REPO_PERMS" = "true" ]; then
-        log "[WARN] Fixing repo permissions for $PROJECT_DIR (chown to $OE_USER)"
-        chown -R "$OE_USER:$OE_USER" "$PROJECT_DIR" >>"$LOG_FILE" 2>&1 || {
-            log "[ERROR] Cannot fix repo permissions"
-            exit 1
-        }
-    else
-        log "[ERROR] Repo not writable by $OE_USER (set FIX_REPO_PERMS=true to auto-fix)"
-        exit 1
-    fi
-fi
+prepare_repo_permissions "$PROJECT_DIR" >>"$LOG_FILE" 2>&1 || {
+    log "[ERROR] Cannot prepare repository permissions (see log: $LOG_FILE)"
+    exit 1
+}
 
 log "[INFO] DB backup (method: $BACKUP_METHOD)..."
 
@@ -375,10 +368,9 @@ fi
 CHANGED=$(run_repo_git diff --name-only HEAD "origin/$BRANCH" | wc -l)
 OLD_COMMIT=$(run_repo_git rev-parse HEAD)
 if [ "$CHANGED" -ne 0 ]; then
-    log "[INFO] Pulling changes from origin/$BRANCH..."
-    if ! run_repo_git pull origin "$BRANCH" >>"$LOG_FILE" 2>&1; then
-        log "[ERROR] git pull failed; rollback to $OLD_COMMIT"
-        restore_repo_commit "$OLD_COMMIT" >>"$LOG_FILE" 2>&1
+    log "[INFO] Fast-forwarding to origin/$BRANCH..."
+    if ! run_repo_git merge --ff-only "origin/$BRANCH" >>"$LOG_FILE" 2>&1; then
+        log "[ERROR] Git fast-forward failed; inspect the repository before retrying."
         exit 1
     fi
 fi
@@ -422,9 +414,8 @@ else
 fi
 
 log "[INFO] Python syntax check..."
-if ! sudo -u "$OE_USER" bash -c \
-    "find '$PROJECT_DIR' -name '*.py' -print0 | xargs -0 '$VENV_PY' -m py_compile" \
-    >>"$LOG_FILE" 2>&1; then
+if ! sudo -u "$OE_USER" "$VENV_PY" -B - "$PROJECT_DIR" \
+    < "$SCRIPT_DIR/odoo-check-python.py" >>"$LOG_FILE" 2>&1; then
     log "[ERROR] Python syntax check failed — rollback to $OLD_COMMIT"
     restore_repo_commit "$OLD_COMMIT" >>"$LOG_FILE" 2>&1
     exit 1

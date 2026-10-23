@@ -4,6 +4,7 @@ from pathlib import Path
 import shlex
 import shutil
 import subprocess
+import sys
 import unittest
 
 import test_git_submodules as fixtures
@@ -40,6 +41,7 @@ case "$name" in
     fi
     exit "${MOCK_PIP_EXIT:-0}" ;;
  python3)
+    if [ "${1:-}" = "-B" ]; then exec "$TEST_PYTHON" "$@"; fi
     if [ "${1:-}" = "-m" ]; then exit 0; fi
     exit "${MOCK_ODOO_EXIT:-0}" ;;
  *) exit 0 ;;
@@ -55,10 +57,12 @@ esac
             self.write_executable(self.home / 'venv/bin' / name, mock)
         self.config = self.root / 'odoo.conf'
         self.config.write_text('[options]\nhttp_port = 8318\n')
-        self.env.update(PATH=f'{self.bin}:{os.environ["PATH"]}', MOCK_LOG=str(self.log))
+        self.env.update(PATH=f'{self.bin}:{os.environ["PATH"]}', MOCK_LOG=str(self.log),
+                        TEST_PYTHON=sys.executable)
         self.scripts = self.root / 'scripts'
         self.scripts.mkdir()
         shutil.copy(SCRIPTS / 'odoo-git-common.sh', self.scripts)
+        shutil.copy(SCRIPTS / 'odoo-check-python.py', self.scripts)
         # Redirect fixed system paths only. Deploy logic and Git commands stay intact.
         for name in ('deploy_odoo.sh', 'odoo-git-update.sh'):
             source = (SCRIPTS / name).read_text()
@@ -170,6 +174,38 @@ esac
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assertIn('-u queue_job --stop-after-init', self.commands())
 
+    def test_git_update_merges_fetched_commit_without_network_pull(self):
+        self.setup_repo(module=False)
+        remote_head = self.fixture.commit_file(self.fixture.repo, 'new.py', 'value = 1\n')
+        result = self.run_script('odoo-git-update.sh')
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertEqual(self.fixture.head(self.clone), remote_head)
+        commands = self.commands()
+        self.assertIn('git fetch --all', commands)
+        self.assertIn('git merge --ff-only origin/main', commands)
+        self.assertLess(commands.index('git fetch --all'),
+                        commands.index('git merge --ff-only origin/main'))
+        self.assertNotIn('git pull ', commands)
+        self.assertFalse(list(self.clone.rglob('__pycache__')))
+
+    def test_git_update_ignores_untracked_broken_python(self):
+        self.setup_repo(module=False)
+        self.fixture.commit_file(self.fixture.repo, 'new.py', 'value = 1\n')
+        (self.clone / 'local.py').write_text('if True\n')
+        result = self.run_script('odoo-git-update.sh')
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assertEqual((self.clone / 'local.py').read_text(), 'if True\n')
+        self.assertFalse(list(self.clone.rglob('__pycache__')))
+
+    def test_git_update_rejects_invalid_tracked_python_before_restart(self):
+        self.setup_repo(module=False)
+        before = self.fixture.head(self.clone)
+        self.fixture.commit_file(self.fixture.repo, 'broken.py', 'if True\n')
+        result = self.run_script('odoo-git-update.sh')
+        self.assertNotEqual(result.returncode, 0)
+        self.assertEqual(self.fixture.head(self.clone), before)
+        self.assertNotIn('systemctl restart', self.commands())
+
     def test_root_git_fallback_preserves_failure_status(self):
         for name in ('deploy_odoo.sh', 'odoo-git-update.sh'):
             with self.subTest(script=name):
@@ -181,7 +217,7 @@ esac
                     'bash', '-c',
                     'log() { :; }; sudo() { return 8; }; '
                     'git() { return 9; }; chown() { return 0; }; '
-                    'DEPLOY_LOG=/dev/null; LOG_FILE=/dev/null; '
+                    'DEPLOY_LOG=/dev/null; LOG_FILE=/dev/null; FIX_REPO_PERMS=true; '
                     + function + '\nif run_repo_git fetch; then exit 0; else exit $?; fi',
                 ], text=True, capture_output=True)
                 self.assertEqual(result.returncode, 9, result.stdout + result.stderr)

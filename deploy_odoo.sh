@@ -108,19 +108,20 @@ log "→ Service: ${SERVICE_NAME}"
 log "→ Verbose mode: ${VERBOSE}"
 
 run_repo_git() {
-    if sudo -u "$OE_USER" -H git "$@"; then
+    local git_status=0
+    sudo -u "$OE_USER" -H git "$@" || git_status=$?
+    if [ "$git_status" -eq 0 ]; then
         return 0
     fi
 
-    if [ "$EUID" -eq 0 ]; then
-        log "⚠ Git access as $OE_USER failed, retrying with root git credentials"
-        local git_status=0
+    # Only fetch may use root credentials. Never repeat a worktree mutation.
+    if [ "${1:-}" = "fetch" ] && [ "$EUID" -eq 0 ] && [ "$FIX_REPO_PERMS" = "true" ]; then
+        log "[WARN] Git fetch as $OE_USER failed, retrying with root credentials"
+        git_status=0
         git "$@" || git_status=$?
-        chown -R "$OE_USER:$OE_USER" "$REPO_PATH" >>"$DEPLOY_LOG" 2>&1 || return $?
-        return "$git_status"
+        chown -h -R "$OE_USER:$OE_USER" "$REPO_PATH" >>"$DEPLOY_LOG" 2>&1 || return $?
     fi
-
-    return 1
+    return "$git_status"
 }
 
 detect_odoo_config() {
@@ -371,18 +372,10 @@ cd "$REPO_PATH"
 sudo -u "$OE_USER" git config --global --add safe.directory "$REPO_PATH" >>"$DEPLOY_LOG" 2>&1 || true
 git config --global --add safe.directory "$REPO_PATH" >>"$DEPLOY_LOG" 2>&1 || true
 
-if ! sudo -u "$OE_USER" test -w "$REPO_PATH/.git" 2>/dev/null; then
-    if [ "$FIX_REPO_PERMS" = "true" ]; then
-        log "⚠ Fixing repo permissions for $REPO_PATH (chown to $OE_USER)"
-        chown -R "$OE_USER:$OE_USER" "$REPO_PATH" >>"$DEPLOY_LOG" 2>&1 || {
-            log "❌ Cannot fix repo permissions (see log: $DEPLOY_LOG)"
-            exit 1
-        }
-    else
-        log "❌ Repo not writable by $OE_USER (set FIX_REPO_PERMS=true to auto-fix)"
-        exit 1
-    fi
-fi
+prepare_repo_permissions "$REPO_PATH" >>"$DEPLOY_LOG" 2>&1 || {
+    log "[ERROR] Cannot prepare repository permissions (see log: $DEPLOY_LOG)"
+    exit 1
+}
 
 check_repo_submodules_clean >>"$DEPLOY_LOG" 2>&1 || {
     log "Submodul ima lokalne izmjene; deploy je zaustavljen."

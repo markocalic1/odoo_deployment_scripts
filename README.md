@@ -368,14 +368,33 @@ instalacija modula i Python ovisnosti konfiguriraju se za konkretnu instancu.
 Git povratak ne vraća stanje baze ni konfiguraciju.
 
 ### Repo Permissions Auto-Fix
-By default, deploy/git-update will auto-fix repo ownership if `.git` is not writable:
+By default, when run as root, deploy/git-update prepare the entire checkout for
+`OE_USER`, including nested addon and migration directories, before changing Git
+state. Symlinks are not followed when changing ownership:
 ```
 FIX_REPO_PERMS=true
 ```
-Set `FIX_REPO_PERMS=false` to disable auto-fix.
+Set `FIX_REPO_PERMS=false` to disable auto-fix. The configured user must then
+already have the required permissions; root credential fallback is disabled.
 
 ### Git Credentials During Deploy
-`deploy_odoo.sh` and `odoo-git-update.sh` first run git as `OE_USER`. If the script is started with `sudo` and that fails (for example, the Odoo user has no SSH deploy key), they retry with `root`'s git credentials and then restore repository ownership back to `OE_USER`.
+`deploy_odoo.sh` and `odoo-git-update.sh` run Git as `OE_USER`. Only a failed
+`fetch` may use root credentials when ownership repair is enabled. Ownership is
+restored afterwards. Worktree operations are never retried as root, including
+after partial failure. `git-update` fast-forwards the fetched `origin/<branch>`
+with `merge --ff-only`; divergent history stops the deployment.
+
+`git-update` checks tracked Python files, including initialized submodules, in
+memory. It creates no `__pycache__` directories and ignores untracked local
+scripts. Syntax errors stop the update before the service is restarted.
+
+A configured instance needs one command, for example:
+```bash
+sudo odooctl git-update prod19 update zez_crm,zez_project_flow
+```
+This performs the configured backup, Git update, syntax check, selected module
+upgrade and service restart. No manual cache-directory or ownership preparation
+is required.
 
 ### Odoo Ports for Sync (optional)
 `odoo-sync.sh` uses:
